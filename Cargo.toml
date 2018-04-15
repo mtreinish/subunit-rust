@@ -1,0 +1,9 @@
+[package]
+name = "subunit-rust"
+version = "0.1.0"
+authors = ["Matthew Treinish <mtreinish@kortar.org>"]
+
+[dependencies]
+chrono = "0.4"
+byteorder = "1"
+crc = "^1.0.0"
