@@ -173,25 +173,23 @@ struct Event {
     test_id: Option<String>,
     timestamp: Option<DateTime<Utc>>,
     file_name: Option<String>,
-    file_content: Option<Vec<u32>>,
+    file_content: Option<Vec<u8>>,
     mime_type: Option<String>,
     route_code: Option<String>,
     tags: Option<Vec<String>>,
 }
 
-struct PacketPart {
-    bytes: Vec<u8>,
-    err: Error
-}
-
 impl Event {
     pub fn write<T: Write>(&mut self, mut writer: T) -> GenResult<T> {
         //  PACKET = SIGNATURE FLAGS PACKET_LENGTH TIMESTAMP? TESTID? TAGS?
-        //           MIME? FILECONTENT? OUTING_CODE? CRC32
+        //           MIME? FILECONTENT? ROUTING_CODE? CRC32
         let flags = self.make_flags()?;
         let timestamp = self.make_timestamp()?;
         let test_id = self.make_test_id()?;
         let tags = self.make_tags()?;
+        let mime_type = self.make_mime_type()?;
+        let file_content = self.make_file_content()?;
+        let routing_code = self.make_routing_code()?;
 
         let mut buffer: Vec<u8> = Vec::new();
         // Calculate length of variable components and 7 for header and crc32
@@ -210,6 +208,15 @@ impl Event {
         for n in tags {
             buffer.write_u8(n)?;
         }
+        for n in mime_type {
+            buffer.write_u8(n)?;
+        }
+        for n in file_content {
+            buffer.write_u8(n)?;
+        }
+        for n in routing_code {
+            buffer.write_u8(n)?;
+        }
         // Flush buffer into output and digest to calculate crc32
         let mut digest = crc32::Digest::new(crc32::IEEE);
         for n in buffer {
@@ -218,6 +225,37 @@ impl Event {
         }
         writer.write_u32::<BigEndian>(digest.sum32())?;
         return Result::Ok(writer);
+    }
+    fn make_routing_code(&self) -> GenResult<Vec<u8>> {
+        let mut routing_code: Vec<u8> = Vec::new();
+        if self.route_code.is_some() {
+            routing_code = write_utf8(
+                self.route_code.as_ref().unwrap(), routing_code)?;
+        }
+        return Result::Ok(routing_code);
+    }
+
+    fn make_file_content(&self) -> GenResult<Vec<u8>> {
+        let mut file_content: Vec<u8> = Vec::new();
+        if self.file_name.is_some() && self.file_content.is_some() {
+            file_content = write_utf8(
+                self.file_name.as_ref().unwrap(), file_content)?;
+            let len = self.file_content.as_ref().unwrap().len();
+            file_content = write_number(len as u32, file_content)?;
+            for n in self.file_content.as_ref().unwrap() {
+                file_content.write_u8(*n)?;
+            }
+        }
+        return Result::Ok(file_content);
+    }
+
+    fn make_mime_type(&self) -> GenResult<Vec<u8>> {
+        let mut mime_type: Vec<u8> = Vec::new();
+        if self.mime_type.is_some() {
+            mime_type = write_utf8(
+                self.mime_type.as_ref().unwrap(), mime_type)?;
+        }
+        return Result::Ok(mime_type);
     }
 
     fn make_tags(&self) -> GenResult<Vec<u8>> {
