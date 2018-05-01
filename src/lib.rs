@@ -21,7 +21,7 @@ use std::io::Read;
 
 use byteorder::{BigEndian, WriteBytesExt};
 use chrono::prelude::*;
-use crc::crc32;
+use crc::{crc32, Hasher32};
 
 #[derive(Debug, Clone)]
 pub struct SizeError;
@@ -33,6 +33,7 @@ pub struct InvalidMask;
 type GenError = Box<Error>;
 type GenResult<T> = Result<T, GenError>;
 
+const SIGNATURE: u8 = 0xB3;
 
 impl fmt::Display for SizeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -184,13 +185,39 @@ struct PacketPart {
 }
 
 impl Event {
-    pub fn write<T: Write>(&mut self, mut writer: T) {
+    pub fn write<T: Write>(&mut self, mut writer: T) -> GenResult<T> {
         //  PACKET = SIGNATURE FLAGS PACKET_LENGTH TIMESTAMP? TESTID? TAGS?
         //           MIME? FILECONTENT? OUTING_CODE? CRC32
-        let flags = self.make_flags();
-        let timestamp = self.make_timestamp();
-        let test_id = self.make_test_id();
-        let tags = self.make_tags();
+        let flags = self.make_flags()?;
+        let timestamp = self.make_timestamp()?;
+        let test_id = self.make_test_id()?;
+        let tags = self.make_tags()?;
+
+        let mut buffer: Vec<u8> = Vec::new();
+        // Calculate length of variable components and 7 for header and crc32
+        let length = timestamp.len() + test_id.len() + tags.len() + 7;
+        // Write event to stream
+        buffer.write_u8(SIGNATURE)?;
+        buffer.write_u16::<BigEndian>(flags)?;
+        buffer = write_number(length as u32, buffer)?;
+
+        for n in timestamp {
+            buffer.write_u8(n)?;
+        }
+        for n in test_id {
+            buffer.write_u8(n)?;
+        }
+        for n in tags {
+            buffer.write_u8(n)?;
+        }
+        // Flush buffer into output and digest to calculate crc32
+        let mut digest = crc32::Digest::new(crc32::IEEE);
+        for n in buffer {
+            digest.write(&[n]);
+            writer.write_u8(n)?;
+        }
+        writer.write_u32::<BigEndian>(digest.sum32())?;
+        return Result::Ok(writer);
     }
 
     fn make_tags(&self) -> GenResult<Vec<u8>> {
