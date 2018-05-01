@@ -190,6 +190,19 @@ impl Event {
         let flags = self.make_flags();
         let timestamp = self.make_timestamp();
         let test_id = self.make_test_id();
+        let tags = self.make_tags();
+    }
+
+    fn make_tags(&self) -> GenResult<Vec<u8>> {
+        let mut tags: Vec<u8> = Vec::new();
+        if self.tags.is_some() {
+            let len = self.tags.as_ref().unwrap().len();
+            tags = write_number(len as u32, tags)?;
+            for tag in self.tags.as_ref().unwrap() {
+                tags = write_utf8(tag, tags)?;
+            }
+        }
+        return Result::Ok(tags);
     }
 
     fn make_test_id(&self) -> GenResult<Vec<u8>> {
