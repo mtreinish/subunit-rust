@@ -189,10 +189,10 @@ impl Event {
         //           MIME? FILECONTENT? OUTING_CODE? CRC32
         let flags = self.make_flags();
         let timestamp = self.make_timestamp();
-        let testID = self.make_testID();
+        let test_id = self.make_test_id();
     }
 
-    fn make_testID(&self) -> GenResult<Vec<u8>> {
+    fn make_test_id(&self) -> GenResult<Vec<u8>> {
         let mut test_id: Vec<u8> = Vec::new();
         if self.test_id.is_some() {
             let raw_id = self.test_id.as_ref().unwrap();
