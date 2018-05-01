@@ -26,35 +26,21 @@ use crc::crc32;
 #[derive(Debug, Clone)]
 pub struct SizeError;
 #[derive(Debug, Clone)]
-pub struct OverSizeError;
-#[derive(Debug, Clone)]
 pub struct InvalidFlag;
 #[derive(Debug, Clone)]
 pub struct InvalidMask;
 
+type GenError = Box<Error>;
+type GenResult<T> = Result<T, GenError>;
+
+
 impl fmt::Display for SizeError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Value must be greater than zero")
-    }
-}
-
-impl Error for SizeError {
-    fn description(&self) -> &str {
-        "Value must be greater than zero"
-    }
-
-    fn cause(&self) -> Option<&Error> {
-        None
-    }
-}
-
-impl fmt::Display for OverSizeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Value is too large to encode")
     }
 }
 
-impl Error for OverSizeError {
+impl Error for SizeError {
     fn description(&self) -> &str {
         "Value is too large to encode"
     }
@@ -64,7 +50,37 @@ impl Error for OverSizeError {
     }
 }
 
+impl fmt::Display for InvalidMask {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Value is too large to encode")
+    }
+}
 
+impl Error for InvalidMask {
+    fn description(&self) -> &str {
+        "Value is too large to encode"
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        None
+    }
+}
+
+impl fmt::Display for InvalidFlag {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Value is too large to encode")
+    }
+}
+
+impl Error for InvalidFlag {
+    fn description(&self) -> &str {
+        "Value is too large to encode"
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        None
+    }
+}
 
 fn flag_to_status(flag: u8) -> Result<String, InvalidFlag> {
   match flag {
@@ -80,7 +96,7 @@ fn flag_to_status(flag: u8) -> Result<String, InvalidFlag> {
   }
 }
 
-fn status_to_flag(status: String) -> Result<u8, InvalidFlag> {
+fn status_to_flag(status: &str) -> Result<u16, InvalidFlag> {
     if status == "" {
         return Result::Ok(0x0);
     } else if status == "exists" {
@@ -167,6 +183,38 @@ struct PacketPart {
     err: Error
 }
 
+impl Event {
+    pub fn write<T: Write>(&mut self, mut writer: T) {
+        //  PACKET = SIGNATURE FLAGS PACKET_LENGTH TIMESTAMP? TESTID? TAGS?
+        //           MIME? FILECONTENT? OUTING_CODE? CRC32
+        let flags = self.make_flags();
+    }
+
+    fn make_flags(&self) -> GenResult<u16> {
+        let mut flags = 0x2000 as u16; // version 0x2
+        flags |= status_to_flag(&self.status)?;
+
+        if self.timestamp.is_some() {
+            flags |= flag_masks("timestamp")?;
+        }
+        if self.test_id.is_some() {
+            flags |= flag_masks("testId")?;
+        }
+        if self.tags.is_some() {
+            flags |= flag_masks("tags")?;
+        }
+        if self.mime_type.is_some() {
+            flags |= flag_masks("mimeType")?;
+        }
+        if self.file_name.is_some() && self.file_content.is_some() {
+            flags |= flag_masks("fileContent")?;
+        }
+        if self.route_code.is_some() {
+            flags |= flag_masks("routeCode")?;
+        }
+        return Result::Ok(flags);
+    }
+}
 
 #[cfg(test)]
 mod tests {
