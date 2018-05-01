@@ -179,7 +179,7 @@ struct Event {
 }
 
 struct PacketPart {
-    bytes: Vec<u32>,
+    bytes: Vec<u8>,
     err: Error
 }
 
@@ -188,6 +188,19 @@ impl Event {
         //  PACKET = SIGNATURE FLAGS PACKET_LENGTH TIMESTAMP? TESTID? TAGS?
         //           MIME? FILECONTENT? OUTING_CODE? CRC32
         let flags = self.make_flags();
+        let timestamp = self.make_timestamp();
+    }
+
+    fn make_timestamp(&self) -> GenResult<Vec<u8>> {
+        let mut timestamp: Vec<u8> = Vec::new();
+        if self.timestamp.is_some() {
+            let secs = self.timestamp.unwrap().timestamp() as u32;
+            timestamp.write_u32::<BigEndian>(secs);
+            let subsec_nanos = self.timestamp.unwrap().timestamp_subsec_nanos();
+            timestamp = write_number(
+                (secs * 1000000000) + subsec_nanos, timestamp)?;
+        }
+        return Result::Ok(timestamp);
     }
 
     fn make_flags(&self) -> GenResult<u16> {
@@ -215,6 +228,7 @@ impl Event {
         return Result::Ok(flags);
     }
 }
+
 
 #[cfg(test)]
 mod tests {
