@@ -66,7 +66,7 @@ impl Error for OverSizeError {
 
 
 
-fn flagToStatus(flag: u8) -> Result<String, InvalidFlag> {
+fn flag_to_status(flag: u8) -> Result<String, InvalidFlag> {
   match flag {
     0x0 => return Result::Ok("".to_string()),
     0x1 => return Result::Ok("exists".to_string()),
@@ -80,7 +80,7 @@ fn flagToStatus(flag: u8) -> Result<String, InvalidFlag> {
   }
 }
 
-fn statusToFlag(status: String) -> Result<u8, InvalidFlag> {
+fn status_to_flag(status: String) -> Result<u8, InvalidFlag> {
     if status == "" {
         return Result::Ok(0x0);
     } else if status == "exists" {
@@ -102,7 +102,7 @@ fn statusToFlag(status: String) -> Result<u8, InvalidFlag> {
     }
 }
 
-fn flagMasks(masks: &str) -> Result<u8, InvalidMask> {
+fn flag_masks(masks: &str) -> Result<u16, InvalidMask> {
   match masks {
     "testId" => return Result::Ok(0x0800),
     "routeCode" => return Result::Ok(0x0400),
@@ -116,15 +116,12 @@ fn flagMasks(masks: &str) -> Result<u8, InvalidMask> {
   }
 }
 
-fn writeNumber<T: Write>(value: u32, mut ret: T) -> Result<T, SizeError>{
+fn write_number<T: Write>(value: u32, mut ret: T) -> Result<T, SizeError>{
     // The first two bits encode the size:
     // 00 = 1 byte
     // 01 = 2 bytes
     // 10 = 3 bytes
     // 11 = 4 bytes
-    if value < 0 {
-        return Result::Err(SizeError);
-    }
 
     if value < 64 { // 2^(8-2)
         // Fits in one byte.
@@ -148,24 +145,24 @@ fn writeNumber<T: Write>(value: u32, mut ret: T) -> Result<T, SizeError>{
     return Result::Ok(ret);
 }
 
-fn writeUtf8<T: Write>(string: String, mut out: T) -> Result<T, SizeError>{
-    out = writeNumber(string.len() as u32, out)?;
+fn write_utf8<T: Write>(string: String, mut out: T) -> Result<T, SizeError>{
+    out = write_number(string.len() as u32, out)?;
     out.write(string.as_bytes());
     return Result::Ok(out);
 }
 
 struct Event {
     status: String,
-    testID: Option<String>,
+    test_id: Option<String>,
     timestamp: Option<DateTime<Utc>>,
-    fileName: Option<String>,
-    fileContent: Option<Vec<u32>>,
-    mimeType: Option<String>,
-    routeCode: Option<String>,
+    file_name: Option<String>,
+    file_content: Option<Vec<u32>>,
+    mime_type: Option<String>,
+    route_code: Option<String>,
     tags: Option<Vec<String>>,
 }
 
-struct packetPart {
+struct PacketPart {
     bytes: Vec<u32>,
     err: Error
 }
