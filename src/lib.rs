@@ -168,7 +168,7 @@ fn write_utf8<T: Write>(string: &str, mut out: T) -> Result<T, SizeError>{
 }
 
 struct Event {
-    status: String,
+    status: Option<String>,
     test_id: Option<String>,
     timestamp: Option<DateTime<Utc>>,
     file_name: Option<String>,
@@ -215,7 +215,9 @@ impl Event {
 
     fn make_flags(&self) -> GenResult<u16> {
         let mut flags = 0x2000 as u16; // version 0x2
-        flags |= status_to_flag(&self.status)?;
+        if self.status.is_some() {
+            flags |= status_to_flag(self.test_id.as_ref().unwrap())?;
+        }
 
         if self.timestamp.is_some() {
             flags |= flag_masks("timestamp")?;
