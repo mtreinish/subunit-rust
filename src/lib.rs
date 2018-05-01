@@ -161,7 +161,7 @@ fn write_number<T: Write>(value: u32, mut ret: T) -> Result<T, SizeError>{
     return Result::Ok(ret);
 }
 
-fn write_utf8<T: Write>(string: String, mut out: T) -> Result<T, SizeError>{
+fn write_utf8<T: Write>(string: &str, mut out: T) -> Result<T, SizeError>{
     out = write_number(string.len() as u32, out)?;
     out.write(string.as_bytes());
     return Result::Ok(out);
@@ -189,6 +189,16 @@ impl Event {
         //           MIME? FILECONTENT? OUTING_CODE? CRC32
         let flags = self.make_flags();
         let timestamp = self.make_timestamp();
+        let testID = self.make_testID();
+    }
+
+    fn make_testID(&self) -> GenResult<Vec<u8>> {
+        let mut test_id: Vec<u8> = Vec::new();
+        if self.test_id.is_some() {
+            let raw_id = self.test_id.as_ref().unwrap();
+            test_id = write_utf8(raw_id, test_id)?;
+        }
+        return Result::Ok(test_id);
     }
 
     fn make_timestamp(&self) -> GenResult<Vec<u8>> {
