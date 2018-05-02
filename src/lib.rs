@@ -21,7 +21,7 @@ use std::io::Read;
 
 use byteorder::{BigEndian, WriteBytesExt};
 use chrono::prelude::*;
-use crc::{crc32, Hasher32};
+use crc::{Hasher32, crc32};
 
 #[derive(Debug, Clone)]
 pub struct SizeError;
@@ -84,17 +84,17 @@ impl Error for InvalidFlag {
 }
 
 fn flag_to_status(flag: u8) -> Result<String, InvalidFlag> {
-  match flag {
-    0x0 => return Result::Ok("".to_string()),
-    0x1 => return Result::Ok("exists".to_string()),
-    0x2 => return Result::Ok("inprogress".to_string()),
-    0x3 => return Result::Ok("success".to_string()),
-    0x4 => return Result::Ok("uxsuccess".to_string()),
-    0x5 => return Result::Ok("skip".to_string()),
-    0x6 => return Result::Ok("fail".to_string()),
-    0x7 => return Result::Ok("xfail".to_string()),
-    _ => return Result::Err(InvalidFlag)
-  }
+    match flag {
+        0x0 => return Result::Ok("".to_string()),
+        0x1 => return Result::Ok("exists".to_string()),
+        0x2 => return Result::Ok("inprogress".to_string()),
+        0x3 => return Result::Ok("success".to_string()),
+        0x4 => return Result::Ok("uxsuccess".to_string()),
+        0x5 => return Result::Ok("skip".to_string()),
+        0x6 => return Result::Ok("fail".to_string()),
+        0x7 => return Result::Ok("xfail".to_string()),
+        _ => return Result::Err(InvalidFlag),
+    }
 }
 
 fn status_to_flag(status: &str) -> Result<u16, InvalidFlag> {
@@ -120,39 +120,43 @@ fn status_to_flag(status: &str) -> Result<u16, InvalidFlag> {
 }
 
 fn flag_masks(masks: &str) -> Result<u16, InvalidMask> {
-  match masks {
-    "testId" => return Result::Ok(0x0800),
-    "routeCode" => return Result::Ok(0x0400),
-    "timestamp" => return Result::Ok(0x0200),
-    "runnable" => return Result::Ok(0x0100),
-    "tags" => return Result::Ok(0x0080),
-    "mimeType" => return Result::Ok(0x0020),
-    "eof" => return Result::Ok(0x0010),
-    "fileContent" => return Result::Ok(0x0040),
-    _ => return Result::Err(InvalidMask)
-  }
+    match masks {
+        "testId" => return Result::Ok(0x0800),
+        "routeCode" => return Result::Ok(0x0400),
+        "timestamp" => return Result::Ok(0x0200),
+        "runnable" => return Result::Ok(0x0100),
+        "tags" => return Result::Ok(0x0080),
+        "mimeType" => return Result::Ok(0x0020),
+        "eof" => return Result::Ok(0x0010),
+        "fileContent" => return Result::Ok(0x0040),
+        _ => return Result::Err(InvalidMask),
+    }
 }
 
-fn write_number<T: Write>(value: u32, mut ret: T) -> Result<T, SizeError>{
+fn write_number<T: Write>(value: u32, mut ret: T) -> Result<T, SizeError> {
     // The first two bits encode the size:
     // 00 = 1 byte
     // 01 = 2 bytes
     // 10 = 3 bytes
     // 11 = 4 bytes
 
-    if value < 64 { // 2^(8-2)
+    // 2^(8-2)
+    if value < 64 {
         // Fits in one byte.
         ret.write_u8(value as u8);
-    } else if value < 16384 { // 2^(16-2)
+    // 2^(16-2):
+    } else if value < 16384 {
         // Fits in two bytes.
         // Set the size to 01.
         ret.write_u16::<BigEndian>(value as u16 | 0x4000);
-    } else if value < 4194304 { // 2^(24-2)
+    // 2^(24-2):
+    } else if value < 4194304 {
         // Fits in three bytes.
         // Drop the two least significant bytes and set the size to 10.
         ret.write_u8(((value >> 16) | 0x80) as u8);
         ret.write_u16::<BigEndian>(value as u16 & 0xffff);
-    } else if value < 1073741824 { // 2^(32-2):
+    // 2^(32-2):
+    } else if value < 1073741824 {
         // Fits in four bytes.
         // Set the size to 11.
         ret.write_u32::<BigEndian>(value | 0xC0000000);
@@ -162,7 +166,7 @@ fn write_number<T: Write>(value: u32, mut ret: T) -> Result<T, SizeError>{
     return Result::Ok(ret);
 }
 
-fn write_utf8<T: Write>(string: &str, mut out: T) -> Result<T, SizeError>{
+fn write_utf8<T: Write>(string: &str, mut out: T) -> Result<T, SizeError> {
     out = write_number(string.len() as u32, out)?;
     out.write(string.as_bytes());
     return Result::Ok(out);
@@ -238,8 +242,7 @@ impl Event {
     fn make_file_content(&self) -> GenResult<Vec<u8>> {
         let mut file_content: Vec<u8> = Vec::new();
         if self.file_name.is_some() && self.file_content.is_some() {
-            file_content = write_utf8(
-                self.file_name.as_ref().unwrap(), file_content)?;
+            file_content = write_utf8(self.file_name.as_ref().unwrap(), file_content)?;
             let len = self.file_content.as_ref().unwrap().len();
             file_content = write_number(len as u32, file_content)?;
             for n in self.file_content.as_ref().unwrap() {
@@ -318,7 +321,6 @@ impl Event {
         return Result::Ok(flags);
     }
 }
-
 
 #[cfg(test)]
 mod tests {
