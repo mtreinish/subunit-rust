@@ -33,7 +33,7 @@ pub struct InvalidMask;
 type GenError = Box<Error>;
 type GenResult<T> = Result<T, GenError>;
 
-const SIGNATURE: u8 = 0xB3;
+const SIGNATURE: u8 = 0xb3;
 
 impl fmt::Display for SizeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -53,13 +53,13 @@ impl Error for SizeError {
 
 impl fmt::Display for InvalidMask {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Value is too large to encode")
+        write!(f, "Mask code is invalid")
     }
 }
 
 impl Error for InvalidMask {
     fn description(&self) -> &str {
-        "Value is too large to encode"
+        "Mask code is valid"
     }
 
     fn cause(&self) -> Option<&Error> {
@@ -69,13 +69,13 @@ impl Error for InvalidMask {
 
 impl fmt::Display for InvalidFlag {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Value is too large to encode")
+        write!(f, "Flag code is invalid")
     }
 }
 
 impl Error for InvalidFlag {
     fn description(&self) -> &str {
-        "Value is too large to encode"
+        "Flag code is invalid"
     }
 
     fn cause(&self) -> Option<&Error> {
@@ -172,7 +172,7 @@ fn write_utf8<T: Write>(string: &str, mut out: T) -> Result<T, SizeError> {
     return Result::Ok(out);
 }
 
-struct Event {
+pub struct Event {
     status: Option<String>,
     test_id: Option<String>,
     timestamp: Option<DateTime<Utc>>,
@@ -196,8 +196,26 @@ impl Event {
         let routing_code = self.make_routing_code()?;
 
         let mut buffer: Vec<u8> = Vec::new();
-        // Calculate length of variable components and 7 for header and crc32
-        let length = timestamp.len() + test_id.len() + tags.len() + 7;
+        let mut body_length = timestamp.len() + test_id.len() + tags.len();
+        body_length += mime_type.len() + file_content.len();
+        body_length += routing_code.len();
+        // baseLength = header (minus variant length) + body + crc32
+        let base_length = 3 + body_length + 4;
+        // length of length depends on baseLength and its own length
+        // 63 - 1
+        let mut length;
+        if (base_length <= 62) {
+            length = base_length + 1;
+        // 16383 - 2
+        } else if (base_length <= 16381) {
+            length = base_length + 2;
+        // 4194303 - 3
+        } else if (base_length <= 4194300) {
+            length = base_length + 3;
+        } else {
+            panic!("The packet is too large");
+        }
+
         // Write event to stream
         buffer.write_u8(SIGNATURE)?;
         buffer.write_u16::<BigEndian>(flags)?;
@@ -288,8 +306,7 @@ impl Event {
             let secs = self.timestamp.unwrap().timestamp() as u32;
             timestamp.write_u32::<BigEndian>(secs);
             let subsec_nanos = self.timestamp.unwrap().timestamp_subsec_nanos();
-            timestamp = write_number(
-                (secs * 1000000000) + subsec_nanos, timestamp)?;
+            timestamp = write_number(subsec_nanos, timestamp)?;
         }
         return Result::Ok(timestamp);
     }
@@ -297,7 +314,7 @@ impl Event {
     fn make_flags(&self) -> GenResult<u16> {
         let mut flags = 0x2000 as u16; // version 0x2
         if self.status.is_some() {
-            flags |= status_to_flag(self.test_id.as_ref().unwrap())?;
+            flags |= status_to_flag(self.status.as_ref().unwrap())?;
         }
 
         if self.timestamp.is_some() {
@@ -324,12 +341,29 @@ impl Event {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     #[test]
     fn it_works() {
         assert_eq!(2 + 2, 4);
     }
     #[test]
-    fn test_write_number_8(){
+    fn test_write_event() {
+        let mut event = Event {
+            status: Some("inprogress".to_string()),
+            test_id: Some("A_test_id".to_string()),
+            timestamp: Some(Utc.ymd(2014, 7, 8).and_hms(9, 10, 11)),
+            tags: Some(vec!["tag_a".to_string(), "tag_b".to_string()]),
+            file_content: None,
+            file_name: None,
+            mime_type: None,
+            route_code: None
+        };
+        let mut buffer: Vec<u8> = Vec::new();
 
+        buffer = match event.write(buffer) {
+            Result::Ok(buffer) => buffer,
+            Result::Err(err) =>
+                panic!("Error while generating subunit {}", err),
+        };
     }
 }
