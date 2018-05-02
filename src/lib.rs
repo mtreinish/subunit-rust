@@ -342,10 +342,7 @@ impl Event {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
+
     #[test]
     fn test_write_event() {
         let mut event = Event {
@@ -359,8 +356,47 @@ mod tests {
             route_code: None
         };
         let mut buffer: Vec<u8> = Vec::new();
+//        use std::fs::File;
+//        let mut buffer = File::create("/tmp/test.subunit").unwrap();
 
         buffer = match event.write(buffer) {
+            Result::Ok(buffer) => buffer,
+            Result::Err(err) =>
+                panic!("Error while generating subunit {}", err),
+        };
+    }
+    #[test]
+    fn test_write_full_test_event_with_file_content() {
+        let mut event = Event {
+            status: Some("inprogress".to_string()),
+            test_id: Some("A_test_id".to_string()),
+            timestamp: Some(Utc.ymd(2014, 7, 8).and_hms(9, 10, 11)),
+            tags: Some(vec!["tag_a".to_string(), "tag_b".to_string()]),
+            file_content: Some("stdout content".to_string().into_bytes()),
+            file_name: Some("stdout:''".to_string()),
+            mime_type: Some("text/plain;charset=utf8".to_string()),
+            route_code: None
+        };
+        let mut event_a = Event {
+            status: Some("fail".to_string()),
+            test_id: Some("A_test_id".to_string()),
+            timestamp: Some(Utc.ymd(2014, 7, 8).and_hms(9, 12, 1)),
+            tags: Some(vec!["tag_a".to_string(), "tag_b".to_string()]),
+            file_content: None,
+            file_name: None,
+            mime_type: None,
+            route_code: None
+        };
+        let mut buffer: Vec<u8> = Vec::new();
+//        use std::fs::File;
+//        let mut buffer = File::create("/tmp/test2.subunit").unwrap();
+
+        buffer = match event.write(buffer) {
+            Result::Ok(buffer) => buffer,
+            Result::Err(err) =>
+                panic!("Error while generating subunit {}", err),
+        };
+        buffer = match event_a.write(buffer) {
             Result::Ok(buffer) => buffer,
             Result::Err(err) =>
                 panic!("Error while generating subunit {}", err),
