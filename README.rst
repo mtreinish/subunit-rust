@@ -15,11 +15,11 @@ the contents of the packet. For example::
         status: Some("inprogress".to_string()),
         test_id: Some("A_test_id".to_string()),
         timestamp: Some(Utc.ymd(2014, 7, 8).and_hms(9, 10, 11)),
-        tags: None,
+        tags: Some(vec!["tag_a".to_string(), "tag_b".to_string()]),
         file_content: None,
         file_name: None,
         mime_type: None,
-        route_code
+        route_code: None
     };
 
 A typical test event normally involves 2 packets though, one to mark the start
@@ -33,7 +33,7 @@ and the other to mark the finish of a test::
         file_content: Some("stdout content".to_string().into_bytes()),
         file_name: Some("stdout:''".to_string()),
         mime_type: Some("text/plain;charset=utf8".to_string()),
-        route_code
+        route_code: None
     };
 
 Then you'll want to write the packet out to something. Anything that implements
