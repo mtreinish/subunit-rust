@@ -203,14 +203,14 @@ impl Event {
         let base_length = 3 + body_length + 4;
         // length of length depends on baseLength and its own length
         // 63 - 1
-        let mut length;
-        if (base_length <= 62) {
+        let length;
+        if base_length <= 62 {
             length = base_length + 1;
         // 16383 - 2
-        } else if (base_length <= 16381) {
+        } else if base_length <= 16381 {
             length = base_length + 2;
         // 4194303 - 3
-        } else if (base_length <= 4194300) {
+        } else if base_length <= 4194300 {
             length = base_length + 3;
         } else {
             panic!("The packet is too large");
@@ -304,7 +304,7 @@ impl Event {
         let mut timestamp: Vec<u8> = Vec::new();
         if self.timestamp.is_some() {
             let secs = self.timestamp.unwrap().timestamp() as u32;
-            timestamp.write_u32::<BigEndian>(secs);
+            timestamp.write_u32::<BigEndian>(secs)?;
             let subsec_nanos = self.timestamp.unwrap().timestamp_subsec_nanos();
             timestamp = write_number(subsec_nanos, timestamp)?;
         }
