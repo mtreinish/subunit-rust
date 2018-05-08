@@ -14,12 +14,14 @@ extern crate byteorder;
 extern crate chrono;
 extern crate crc;
 
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 use std::io::Write;
 use std::io::Read;
+use std::io::Cursor;
 
-use byteorder::{BigEndian, WriteBytesExt};
+use byteorder::{BigEndian, WriteBytesExt, ReadBytesExt};
 use chrono::prelude::*;
 use crc::{Hasher32, crc32};
 
@@ -133,6 +135,34 @@ fn flag_masks(masks: &str) -> Result<u16, InvalidMask> {
     }
 }
 
+fn flags_to_masks(flags: u16) -> GenResult<HashSet<String>> {
+    let static_flags: [u16; 8] = [0x0800, 0x0400, 0x0200, 0x0100,
+                               0x0080, 0x0020, 0x0010, 0x0040];
+    let mut masks: HashSet<String> = HashSet::new();
+    for flag in static_flags.into_iter() {
+        if flags & *flag != 0 {
+            if *flag == 0x0800 {
+                masks.insert("testId".to_string());
+            } else if *flag == 0x0400 {
+                masks.insert("routeCode".to_string());
+            } else if *flag == 0x0200 {
+                masks.insert("timestamp".to_string());
+            } else if *flag == 0x0100 {
+                masks.insert("runnable".to_string());
+            } else if *flag == 0x0080 {
+                masks.insert("tags".to_string());
+            } else if *flag == 0x0020 {
+                masks.insert("mimeType".to_string());
+            } else if *flag == 0x0010 {
+                masks.insert("eof".to_string());
+            } else if *flag == 0x0040 {
+                masks.insert("fileContent".to_string());
+            }
+        }
+    }
+    return Result::Ok(masks);
+}
+
 fn write_number<T: Write>(value: u32, mut ret: T) -> Result<T, SizeError> {
     // The first two bits encode the size:
     // 00 = 1 byte
@@ -170,6 +200,148 @@ fn write_utf8<T: Write>(string: &str, mut out: T) -> Result<T, SizeError> {
     out = write_number(string.len() as u32, out)?;
     out.write(string.as_bytes());
     return Result::Ok(out);
+}
+
+pub fn read_number(reader: &mut Cursor<Vec<u8>>) -> GenResult<u32> {
+    let first = reader.read_u8()?;
+    // Get 2 first bits for prefix
+    let number_type = first & 0xc0;
+    // Get last 6 bits for first octet
+    let mut value = first as u32 & 0x3f;
+    // 0b00, 1 octet
+    if number_type == 0x00 {
+        return Result::Ok(value as u32);
+    // 0b01, 2octets
+    } else if number_type == 0x40 {
+        let suffix = reader.read_u8()?;
+        value = (value << 8) | suffix as u32;
+        return Result::Ok(value as u32);
+    // 0b10, 3 octets
+    } else if number_type == 0x80 {
+        let suffix = reader.read_u16::<BigEndian>()?;
+        value = (value << 16) | suffix as u32;
+        return Result::Ok(value as u32);
+    // 0b11, 4 octets
+    } else {
+        let suffix = reader.read_u32::<BigEndian>()?;
+        value = (value << 24) | suffix;
+        return Result::Ok(value as u32);
+    }
+}
+
+fn read_utf8(reader: &mut Cursor<Vec<u8>>) -> GenResult<String> {
+    let length = read_number(reader)?;
+    let mut bytes: Vec<u8> = Vec::new();
+    for _i in 0..length {
+        let byte = reader.read_u8()?;
+        bytes.push(byte)
+    }
+    let output = String::from_utf8(bytes)?;
+    return Result::Ok(output);
+}
+
+
+fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
+    let start_position = cursor.position();
+    let sig = cursor.read_u8()?;
+    let flags = cursor.read_u16::<BigEndian>()?;
+    let packet_length = read_number(cursor)?;
+    if sig != SIGNATURE {
+        panic!("Invalid signature");
+    }
+    let status = flag_to_status((flags & 0x0007) as u8)?;
+    let masks = flags_to_masks(flags)?;
+
+    let timestamp;
+    if masks.contains("timestamp") {
+        let seconds = cursor.read_u32::<BigEndian>()?;
+        let nanos = read_number(cursor)?;
+        timestamp = Some(Utc.timestamp(seconds as i64, nanos));
+    } else {
+        timestamp = None;
+    }
+    let test_id;
+    if masks.contains("testId") {
+        let id = read_utf8(cursor)?;
+        test_id = Some(id)
+    } else {
+        test_id = None;
+    }
+    let tags;
+    if masks.contains("tags") {
+        let count = read_number(cursor)?;
+        let mut tags_vec: Vec<String> = Vec::new();
+        for _i in 0..count {
+            let tag = read_utf8(cursor)?;
+            tags_vec.push(tag);
+        }
+        tags = Some(tags_vec);
+
+    } else {
+        tags = None;
+    }
+    let mime_type;
+    if masks.contains("mimeType") {
+        let mime = read_utf8(cursor)?;
+        mime_type = Some(mime);
+    } else {
+        mime_type = None;
+    }
+    let file_content;
+    let file_name;
+    if masks.contains("fileContent") {
+        let name = read_utf8(cursor)?;
+        file_name = Some(name);
+        let file_length = read_number(cursor)?;
+        let mut content: Vec<u8> = Vec::new();
+        for _i in 0..file_length {
+            let byte = cursor.read_u8()?;
+            content.push(byte);
+        }
+        file_content = Some(content);
+
+    } else {
+        file_content = None;
+        file_name = None;
+    }
+
+    let route_code;
+    if masks.contains("routeCode") {
+        let code = read_utf8(cursor)?;
+        route_code = Some(code);
+    } else {
+        route_code = None;
+    }
+    let _crc32 = cursor.read_u32::<BigEndian>()?;
+    let end_position = cursor.position();
+    if packet_length as u64 != (end_position - start_position) {
+        panic!("Packet length doesn't match");
+    }
+
+    let event = Event{
+        status: Some(status),
+        test_id: test_id,
+        timestamp: timestamp,
+        tags: tags,
+        file_content: file_content,
+        file_name: file_name,
+        mime_type: mime_type,
+        route_code: route_code
+    };
+    return Result::Ok(event);
+}
+
+pub fn parse_subunit<T: Read>(mut reader: T) -> GenResult<Vec<Event>> {
+    let mut output: Vec<Event> = Vec::new();
+    let mut contents: Vec<u8> = Vec::new();
+    reader.read_to_end(&mut contents)?;
+    let stream_length = contents.len() as u64;
+    let cursor = &mut Cursor::new(contents);
+    while cursor.position() < stream_length {
+        let packet = read_packet(cursor)?;
+        output.push(packet);
+    }
+    return Result::Ok(output);
 }
 
 pub struct Event {
@@ -364,6 +536,17 @@ mod tests {
             Result::Err(err) =>
                 panic!("Error while generating subunit {}", err),
         };
+        let cursor = Cursor::new(buffer);
+        let out_events = parse_subunit(cursor);
+        let out_event = out_events.unwrap().pop().unwrap();
+        assert_eq!(event.test_id, out_event.test_id);
+        assert_eq!(event.status, out_event.status);
+        assert_eq!(event.timestamp, out_event.timestamp);
+        assert_eq!(event.tags, out_event.tags);
+        assert_eq!(event.file_content, out_event.file_content);
+        assert_eq!(event.file_name, out_event.file_name);
+        assert_eq!(event.mime_type, out_event.mime_type);
+        assert_eq!(event.route_code, out_event.route_code);
     }
     #[test]
     fn test_write_full_test_event_with_file_content() {
@@ -401,5 +584,27 @@ mod tests {
             Result::Err(err) =>
                 panic!("Error while generating subunit {}", err),
         };
+        let cursor = Cursor::new(buffer);
+        let mut out_events = parse_subunit(cursor).unwrap();
+        // Parse last packet
+        let out_event_a = out_events.pop().unwrap();
+        assert_eq!(event_a.test_id, out_event_a.test_id);
+        assert_eq!(event_a.status, out_event_a.status);
+        assert_eq!(event_a.timestamp, out_event_a.timestamp);
+        assert_eq!(event_a.tags, out_event_a.tags);
+        assert_eq!(event_a.file_content, out_event_a.file_content);
+        assert_eq!(event_a.file_name, out_event_a.file_name);
+        assert_eq!(event_a.mime_type, out_event_a.mime_type);
+        assert_eq!(event_a.route_code, out_event_a.route_code);
+        // Parse first packet
+        let out_event = out_events.pop().unwrap();
+        assert_eq!(event.test_id, out_event.test_id);
+        assert_eq!(event.status, out_event.status);
+        assert_eq!(event.timestamp, out_event.timestamp);
+        assert_eq!(event.tags, out_event.tags);
+        assert_eq!(event.file_content, out_event.file_content);
+        assert_eq!(event.file_name, out_event.file_name);
+        assert_eq!(event.mime_type, out_event.mime_type);
+        assert_eq!(event.route_code, out_event.route_code);
     }
 }
