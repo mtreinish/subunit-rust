@@ -21,7 +21,7 @@ use std::io::Write;
 use std::io::Read;
 use std::io::Cursor;
 
-use byteorder::{BigEndian, WriteBytesExt, ReadBytesExt};
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use chrono::prelude::*;
 use crc::{Hasher32, crc32};
 
@@ -136,8 +136,9 @@ fn flag_masks(masks: &str) -> Result<u16, InvalidMask> {
 }
 
 fn flags_to_masks(flags: u16) -> GenResult<HashSet<String>> {
-    let static_flags: [u16; 8] = [0x0800, 0x0400, 0x0200, 0x0100,
-                               0x0080, 0x0020, 0x0010, 0x0040];
+    let static_flags: [u16; 8] = [
+        0x0800, 0x0400, 0x0200, 0x0100, 0x0080, 0x0020, 0x0010, 0x0040
+    ];
     let mut masks: HashSet<String> = HashSet::new();
     for flag in static_flags.into_iter() {
         if flags & *flag != 0 {
@@ -240,7 +241,6 @@ fn read_utf8(reader: &mut Cursor<Vec<u8>>) -> GenResult<String> {
     return Result::Ok(output);
 }
 
-
 fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
     let start_position = cursor.position();
     let sig = cursor.read_u8()?;
@@ -276,7 +276,6 @@ fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
             tags_vec.push(tag);
         }
         tags = Some(tags_vec);
-
     } else {
         tags = None;
     }
@@ -299,7 +298,6 @@ fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
             content.push(byte);
         }
         file_content = Some(content);
-
     } else {
         file_content = None;
         file_name = None;
@@ -318,7 +316,7 @@ fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
         panic!("Packet length doesn't match");
     }
 
-    let event = Event{
+    let event = Event {
         status: Some(status),
         test_id: test_id,
         timestamp: timestamp,
@@ -326,7 +324,7 @@ fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
         file_content: file_content,
         file_name: file_name,
         mime_type: mime_type,
-        route_code: route_code
+        route_code: route_code,
     };
     return Result::Ok(event);
 }
@@ -432,7 +430,8 @@ impl Event {
     fn make_file_content(&self) -> GenResult<Vec<u8>> {
         let mut file_content: Vec<u8> = Vec::new();
         if self.file_name.is_some() && self.file_content.is_some() {
-            file_content = write_utf8(self.file_name.as_ref().unwrap(), file_content)?;
+            file_content = write_utf8(
+                self.file_name.as_ref().unwrap(), file_content)?;
             let len = self.file_content.as_ref().unwrap().len();
             file_content = write_number(len as u32, file_content)?;
             for n in self.file_content.as_ref().unwrap() {
@@ -525,16 +524,16 @@ mod tests {
             file_content: None,
             file_name: None,
             mime_type: None,
-            route_code: None
+            route_code: None,
         };
         let mut buffer: Vec<u8> = Vec::new();
-//        use std::fs::File;
-//        let mut buffer = File::create("/tmp/test.subunit").unwrap();
+        //        use std::fs::File;
+        //        let mut buffer = File::create("/tmp/test.subunit").unwrap();
 
         buffer = match event.write(buffer) {
             Result::Ok(buffer) => buffer,
-            Result::Err(err) =>
-                panic!("Error while generating subunit {}", err),
+            Result::Err(err) => panic!(
+                "Error while generating subunit {}", err),
         };
         let cursor = Cursor::new(buffer);
         let out_events = parse_subunit(cursor);
@@ -558,7 +557,7 @@ mod tests {
             file_content: Some("stdout content".to_string().into_bytes()),
             file_name: Some("stdout:''".to_string()),
             mime_type: Some("text/plain;charset=utf8".to_string()),
-            route_code: None
+            route_code: None,
         };
         let mut event_a = Event {
             status: Some("fail".to_string()),
@@ -568,21 +567,21 @@ mod tests {
             file_content: None,
             file_name: None,
             mime_type: None,
-            route_code: None
+            route_code: None,
         };
         let mut buffer: Vec<u8> = Vec::new();
-//        use std::fs::File;
-//        let mut buffer = File::create("/tmp/test2.subunit").unwrap();
+        //        use std::fs::File;
+        //        let mut buffer = File::create("/tmp/test2.subunit").unwrap();
 
         buffer = match event.write(buffer) {
             Result::Ok(buffer) => buffer,
-            Result::Err(err) =>
-                panic!("Error while generating subunit {}", err),
+            Result::Err(err) => panic!(
+                "Error while generating subunit {}", err),
         };
         buffer = match event_a.write(buffer) {
             Result::Ok(buffer) => buffer,
-            Result::Err(err) =>
-                panic!("Error while generating subunit {}", err),
+            Result::Err(err) => panic!(
+                "Error while generating subunit {}", err),
         };
         let cursor = Cursor::new(buffer);
         let mut out_events = parse_subunit(cursor).unwrap();
