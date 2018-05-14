@@ -5,6 +5,21 @@ This repo contains a implementation of the subunit protocol in Rust. It
 provides an interface for both writing and reading subunit streams natively in
 rust.
 
+Reading subunit packets
+=======================
+
+Reading subunit packets first requires an object implementing the Read trait
+containing the subunit stream. The parse_subunit() function is used to first
+buffer the entire stream in memory, and then parse the contents and return
+a vector of Event structs. For example, parsing a subunit stream from a file::
+
+    let mut f = File::open("results.subunit")?;
+    let events = parse_subunit(f).unwrap();
+
+In this example, the `results.subunit` file will be opened and parsed with an
+Event struct in the events vector for each subunit packet in the file.
+
+
 Writing subunit packets
 =======================
 
