@@ -10,7 +10,9 @@ Subunit Rust
 
 This repo contains a implementation of the subunit protocol in Rust. It
 provides an interface for both writing and reading subunit streams natively in
-rust.
+rust. The rust protocol is documented in the
+[testing-cabal/subunit](https://github.com/testing-cabal/subunit/blob/master/README.rst#version-2)
+repository.
 
 ## Reading subunit packets
 
