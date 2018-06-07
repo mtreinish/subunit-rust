@@ -343,14 +343,14 @@ pub fn parse_subunit<T: Read>(mut reader: T) -> GenResult<Vec<Event>> {
 }
 
 pub struct Event {
-    status: Option<String>,
-    test_id: Option<String>,
-    timestamp: Option<DateTime<Utc>>,
-    file_name: Option<String>,
-    file_content: Option<Vec<u8>>,
-    mime_type: Option<String>,
-    route_code: Option<String>,
-    tags: Option<Vec<String>>,
+    pub status: Option<String>,
+    pub test_id: Option<String>,
+    pub timestamp: Option<DateTime<Utc>>,
+    pub file_name: Option<String>,
+    pub file_content: Option<Vec<u8>>,
+    pub mime_type: Option<String>,
+    pub route_code: Option<String>,
+    pub tags: Option<Vec<String>>,
 }
 
 impl Event {
