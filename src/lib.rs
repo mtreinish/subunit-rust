@@ -434,9 +434,7 @@ impl Event {
                 self.file_name.as_ref().unwrap(), file_content)?;
             let len = self.file_content.as_ref().unwrap().len();
             file_content = write_number(len as u32, file_content)?;
-            for n in self.file_content.as_ref().unwrap() {
-                file_content.write_u8(*n)?;
-            }
+            file_content.write(self.file_content.as_ref().unwrap());
         }
         return Result::Ok(file_content);
     }
