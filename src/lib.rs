@@ -391,16 +391,16 @@ impl Event {
         buffer.write_u16::<BigEndian>(flags)?;
         buffer = write_number(length as u32, buffer)?;
 
-        buffer.write(&timestamp);
-        buffer.write(&test_id);
-        buffer.write(&tags);
-        buffer.write(&mime_type);
-        buffer.write(&file_content);
-        buffer.write(&routing_code);
+        buffer.write(&timestamp)?;
+        buffer.write(&test_id)?;
+        buffer.write(&tags)?;
+        buffer.write(&mime_type)?;
+        buffer.write(&file_content)?;
+        buffer.write(&routing_code)?;
         // Flush buffer into output and digest to calculate crc32
         let mut digest = crc32::Digest::new(crc32::IEEE);
         digest.write(&buffer);
-        writer.write(&buffer);
+        writer.write(&buffer)?;
         writer.write_u32::<BigEndian>(digest.sum32())?;
         return Result::Ok(writer);
     }
