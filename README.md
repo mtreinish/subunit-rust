@@ -1,7 +1,7 @@
 Subunit Rust
 ============
-[![Chrono on Travis CI][travis-image]][travis]
-[![Chrono on crates.io][cratesio-image]][cratesio]
+[![subunit-rust on Travis CI][travis-image]][travis]
+[![subunit-rust on crates.io][cratesio-image]][cratesio]
 
 [travis-image]: https://travis-ci.org/mtreinish/subunit-rust.svg?branch=master
 [travis]: https://travis-ci.org/mtreinish/subunit-rust
