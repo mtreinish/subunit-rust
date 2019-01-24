@@ -10,6 +10,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![deny(warnings)]
+
 extern crate byteorder;
 extern crate chrono;
 extern crate crc;
@@ -17,13 +19,13 @@ extern crate crc;
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
-use std::io::Write;
-use std::io::Read;
 use std::io::Cursor;
+use std::io::Read;
+use std::io::Write;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use chrono::prelude::*;
-use crc::{Hasher32, crc32};
+use crc::{crc32, Hasher32};
 
 #[derive(Debug, Clone)]
 pub struct SizeError;
@@ -137,7 +139,7 @@ fn flag_masks(masks: &str) -> Result<u16, InvalidMask> {
 
 fn flags_to_masks(flags: u16) -> GenResult<HashSet<String>> {
     let static_flags: [u16; 8] = [
-        0x0800, 0x0400, 0x0200, 0x0100, 0x0080, 0x0020, 0x0010, 0x0040
+        0x0800, 0x0400, 0x0200, 0x0100, 0x0080, 0x0020, 0x0010, 0x0040,
     ];
     let mut masks: HashSet<String> = HashSet::new();
     for flag in static_flags.into_iter() {
@@ -164,7 +166,7 @@ fn flags_to_masks(flags: u16) -> GenResult<HashSet<String>> {
     return Result::Ok(masks);
 }
 
-fn write_number<T: Write>(value: u32, mut ret: T) -> Result<T, SizeError> {
+fn write_number<T: Write>(value: u32, mut ret: T) -> GenResult<T> {
     // The first two bits encode the size:
     // 00 = 1 byte
     // 01 = 2 bytes
@@ -174,32 +176,32 @@ fn write_number<T: Write>(value: u32, mut ret: T) -> Result<T, SizeError> {
     // 2^(8-2)
     if value < 64 {
         // Fits in one byte.
-        ret.write_u8(value as u8);
+        ret.write_u8(value as u8)?
     // 2^(16-2):
     } else if value < 16384 {
         // Fits in two bytes.
         // Set the size to 01.
-        ret.write_u16::<BigEndian>(value as u16 | 0x4000);
+        ret.write_u16::<BigEndian>(value as u16 | 0x4000)?
     // 2^(24-2):
     } else if value < 4194304 {
         // Fits in three bytes.
         // Drop the two least significant bytes and set the size to 10.
-        ret.write_u8(((value >> 16) | 0x80) as u8);
-        ret.write_u16::<BigEndian>(value as u16 & 0xffff);
+        ret.write_u8(((value >> 16) | 0x80) as u8)?;
+        ret.write_u16::<BigEndian>(value as u16 & 0xffff)?;
     // 2^(32-2):
     } else if value < 1073741824 {
         // Fits in four bytes.
         // Set the size to 11.
-        ret.write_u32::<BigEndian>(value | 0xC0000000);
+        ret.write_u32::<BigEndian>(value | 0xC0000000)?;
     } else {
-        return Result::Err(SizeError);
+        return Result::Err(Box::new(SizeError));
     }
-    return Result::Ok(ret);
+    Result::Ok(ret)
 }
 
-fn write_utf8<T: Write>(string: &str, mut out: T) -> Result<T, SizeError> {
+fn write_utf8<T: Write>(string: &str, mut out: T) -> GenResult<T> {
     out = write_number(string.len() as u32, out)?;
-    out.write(string.as_bytes());
+    out.write_all(string.as_bytes())?;
     return Result::Ok(out);
 }
 
@@ -407,20 +409,23 @@ impl Event {
     fn make_routing_code(&self) -> GenResult<Vec<u8>> {
         let mut routing_code: Vec<u8> = Vec::new();
         if self.route_code.is_some() {
-            routing_code = write_utf8(
-                self.route_code.as_ref().unwrap(), routing_code)?;
+            routing_code = write_utf8(self.route_code.as_ref().unwrap(), routing_code)?;
         }
         return Result::Ok(routing_code);
     }
 
     fn make_file_content(&self) -> GenResult<Vec<u8>> {
         let mut file_content: Vec<u8> = Vec::new();
-        if self.file_name.is_some() && self.file_content.is_some() {
-            file_content = write_utf8(
-                self.file_name.as_ref().unwrap(), file_content)?;
-            let len = self.file_content.as_ref().unwrap().len();
-            file_content = write_number(len as u32, file_content)?;
-            file_content.write(self.file_content.as_ref().unwrap());
+        if self.file_name.is_some() {
+            match self.file_content {
+                Option::Some(ref body) => {
+                    file_content = write_utf8(self.file_name.as_ref().unwrap(), file_content)?;
+                    let len = self.file_content.as_ref().unwrap().len();
+                    file_content = write_number(len as u32, file_content)?;
+                    file_content.write_all(&body)?;
+                }
+                Option::None => (), // missing body is ok ?
+            }
         }
         return Result::Ok(file_content);
     }
@@ -428,8 +433,7 @@ impl Event {
     fn make_mime_type(&self) -> GenResult<Vec<u8>> {
         let mut mime_type: Vec<u8> = Vec::new();
         if self.mime_type.is_some() {
-            mime_type = write_utf8(
-                self.mime_type.as_ref().unwrap(), mime_type)?;
+            mime_type = write_utf8(self.mime_type.as_ref().unwrap(), mime_type)?;
         }
         return Result::Ok(mime_type);
     }
@@ -463,7 +467,7 @@ impl Event {
             let subsec_nanos = self.timestamp.unwrap().timestamp_subsec_nanos();
             timestamp = write_number(subsec_nanos, timestamp)?;
         }
-        return Result::Ok(timestamp);
+        Result::Ok(timestamp)
     }
 
     fn make_flags(&self) -> GenResult<u16> {
@@ -516,8 +520,7 @@ mod tests {
 
         buffer = match event.write(buffer) {
             Result::Ok(buffer) => buffer,
-            Result::Err(err) => panic!(
-                "Error while generating subunit {}", err),
+            Result::Err(err) => panic!("Error while generating subunit {}", err),
         };
         let cursor = Cursor::new(buffer);
         let out_events = parse_subunit(cursor);
@@ -559,13 +562,11 @@ mod tests {
 
         buffer = match event.write(buffer) {
             Result::Ok(buffer) => buffer,
-            Result::Err(err) => panic!(
-                "Error while generating subunit {}", err),
+            Result::Err(err) => panic!("Error while generating subunit {}", err),
         };
         buffer = match event_a.write(buffer) {
             Result::Ok(buffer) => buffer,
-            Result::Err(err) => panic!(
-                "Error while generating subunit {}", err),
+            Result::Err(err) => panic!("Error while generating subunit {}", err),
         };
         let cursor = Cursor::new(buffer);
         let mut out_events = parse_subunit(cursor).unwrap();
