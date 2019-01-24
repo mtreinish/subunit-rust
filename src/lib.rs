@@ -11,6 +11,7 @@
 // limitations under the License.
 
 #![deny(warnings)]
+#![allow(clippy::unreadable_literal)]
 
 extern crate byteorder;
 extern crate chrono;
@@ -89,51 +90,51 @@ impl Error for InvalidFlag {
 
 fn flag_to_status(flag: u8) -> Result<String, InvalidFlag> {
     match flag {
-        0x0 => return Result::Ok("".to_string()),
-        0x1 => return Result::Ok("exists".to_string()),
-        0x2 => return Result::Ok("inprogress".to_string()),
-        0x3 => return Result::Ok("success".to_string()),
-        0x4 => return Result::Ok("uxsuccess".to_string()),
-        0x5 => return Result::Ok("skip".to_string()),
-        0x6 => return Result::Ok("fail".to_string()),
-        0x7 => return Result::Ok("xfail".to_string()),
-        _ => return Result::Err(InvalidFlag),
+        0x0 => Result::Ok("".to_string()),
+        0x1 => Result::Ok("exists".to_string()),
+        0x2 => Result::Ok("inprogress".to_string()),
+        0x3 => Result::Ok("success".to_string()),
+        0x4 => Result::Ok("uxsuccess".to_string()),
+        0x5 => Result::Ok("skip".to_string()),
+        0x6 => Result::Ok("fail".to_string()),
+        0x7 => Result::Ok("xfail".to_string()),
+        _ => Result::Err(InvalidFlag),
     }
 }
 
 fn status_to_flag(status: &str) -> Result<u16, InvalidFlag> {
     if status == "" {
-        return Result::Ok(0x0);
+        Result::Ok(0x0)
     } else if status == "exists" {
-        return Result::Ok(0x1);
+        Result::Ok(0x1)
     } else if status == "inprogress" {
-        return Result::Ok(0x2);
+        Result::Ok(0x2)
     } else if status == "success" {
-        return Result::Ok(0x3);
+        Result::Ok(0x3)
     } else if status == "uxsuccess" {
-        return Result::Ok(0x4);
+        Result::Ok(0x4)
     } else if status == "skip" {
-        return Result::Ok(0x5);
+        Result::Ok(0x5)
     } else if status == "fail" {
-        return Result::Ok(0x6);
+        Result::Ok(0x6)
     } else if status == "xfail" {
-        return Result::Ok(0x7);
+        Result::Ok(0x7)
     } else {
-        return Result::Err(InvalidFlag);
+        Result::Err(InvalidFlag)
     }
 }
 
 fn flag_masks(masks: &str) -> Result<u16, InvalidMask> {
     match masks {
-        "testId" => return Result::Ok(0x0800),
-        "routeCode" => return Result::Ok(0x0400),
-        "timestamp" => return Result::Ok(0x0200),
-        "runnable" => return Result::Ok(0x0100),
-        "tags" => return Result::Ok(0x0080),
-        "mimeType" => return Result::Ok(0x0020),
-        "eof" => return Result::Ok(0x0010),
-        "fileContent" => return Result::Ok(0x0040),
-        _ => return Result::Err(InvalidMask),
+        "testId" => Result::Ok(0x0800),
+        "routeCode" => Result::Ok(0x0400),
+        "timestamp" => Result::Ok(0x0200),
+        "runnable" => Result::Ok(0x0100),
+        "tags" => Result::Ok(0x0080),
+        "mimeType" => Result::Ok(0x0020),
+        "eof" => Result::Ok(0x0010),
+        "fileContent" => Result::Ok(0x0040),
+        _ => Result::Err(InvalidMask),
     }
 }
 
@@ -142,7 +143,7 @@ fn flags_to_masks(flags: u16) -> GenResult<HashSet<String>> {
         0x0800, 0x0400, 0x0200, 0x0100, 0x0080, 0x0020, 0x0010, 0x0040,
     ];
     let mut masks: HashSet<String> = HashSet::new();
-    for flag in static_flags.into_iter() {
+    for flag in static_flags.iter() {
         if flags & *flag != 0 {
             if *flag == 0x0800 {
                 masks.insert("testId".to_string());
@@ -163,7 +164,7 @@ fn flags_to_masks(flags: u16) -> GenResult<HashSet<String>> {
             }
         }
     }
-    return Result::Ok(masks);
+    Result::Ok(masks)
 }
 
 fn write_number<T: Write>(value: u32, mut ret: T) -> GenResult<T> {
@@ -187,7 +188,7 @@ fn write_number<T: Write>(value: u32, mut ret: T) -> GenResult<T> {
         // Fits in three bytes.
         // Drop the two least significant bytes and set the size to 10.
         ret.write_u8(((value >> 16) | 0x80) as u8)?;
-        ret.write_u16::<BigEndian>(value as u16 & 0xffff)?;
+        ret.write_u16::<BigEndian>(value as u16)?;
     // 2^(32-2):
     } else if value < 1073741824 {
         // Fits in four bytes.
@@ -202,7 +203,7 @@ fn write_number<T: Write>(value: u32, mut ret: T) -> GenResult<T> {
 fn write_utf8<T: Write>(string: &str, mut out: T) -> GenResult<T> {
     out = write_number(string.len() as u32, out)?;
     out.write_all(string.as_bytes())?;
-    return Result::Ok(out);
+    Result::Ok(out)
 }
 
 pub fn read_number(reader: &mut Cursor<Vec<u8>>) -> GenResult<u32> {
@@ -210,25 +211,25 @@ pub fn read_number(reader: &mut Cursor<Vec<u8>>) -> GenResult<u32> {
     // Get 2 first bits for prefix
     let number_type = first & 0xc0;
     // Get last 6 bits for first octet
-    let mut value = first as u32 & 0x3f;
+    let mut value = u32::from(first) & 0x3f;
     // 0b00, 1 octet
     if number_type == 0x00 {
-        return Result::Ok(value as u32);
+        Result::Ok(value as u32)
     // 0b01, 2octets
     } else if number_type == 0x40 {
         let suffix = reader.read_u8()?;
-        value = (value << 8) | suffix as u32;
-        return Result::Ok(value as u32);
+        value = (value << 8) | u32::from(suffix);
+        Result::Ok(value as u32)
     // 0b10, 3 octets
     } else if number_type == 0x80 {
         let suffix = reader.read_u16::<BigEndian>()?;
-        value = (value << 16) | suffix as u32;
-        return Result::Ok(value as u32);
+        value = (value << 16) | u32::from(suffix);
+        Result::Ok(value as u32)
     // 0b11, 4 octets
     } else {
         let suffix = reader.read_u32::<BigEndian>()?;
         value = (value << 24) | suffix;
-        return Result::Ok(value as u32);
+        Result::Ok(value as u32)
     }
 }
 
@@ -240,7 +241,7 @@ fn read_utf8(reader: &mut Cursor<Vec<u8>>) -> GenResult<String> {
         bytes.push(byte)
     }
     let output = String::from_utf8(bytes)?;
-    return Result::Ok(output);
+    Result::Ok(output)
 }
 
 fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
@@ -254,14 +255,13 @@ fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
     let status = flag_to_status((flags & 0x0007) as u8)?;
     let masks = flags_to_masks(flags)?;
 
-    let timestamp;
-    if masks.contains("timestamp") {
+    let timestamp = if masks.contains("timestamp") {
         let seconds = cursor.read_u32::<BigEndian>()?;
         let nanos = read_number(cursor)?;
-        timestamp = Some(Utc.timestamp(seconds as i64, nanos));
+        Some(Utc.timestamp(i64::from(seconds), nanos))
     } else {
-        timestamp = None;
-    }
+        None
+    };
     let test_id;
     if masks.contains("testId") {
         let id = read_utf8(cursor)?;
@@ -269,25 +269,23 @@ fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
     } else {
         test_id = None;
     }
-    let tags;
-    if masks.contains("tags") {
+    let tags = if masks.contains("tags") {
         let count = read_number(cursor)?;
         let mut tags_vec: Vec<String> = Vec::new();
         for _i in 0..count {
             let tag = read_utf8(cursor)?;
             tags_vec.push(tag);
         }
-        tags = Some(tags_vec);
+        Some(tags_vec)
     } else {
-        tags = None;
-    }
-    let mime_type;
-    if masks.contains("mimeType") {
+         None
+    };
+    let mime_type = if masks.contains("mimeType") {
         let mime = read_utf8(cursor)?;
-        mime_type = Some(mime);
+        Some(mime)
     } else {
-        mime_type = None;
-    }
+        None
+    };
     let file_content;
     let file_name;
     if masks.contains("fileContent") {
@@ -305,30 +303,29 @@ fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
         file_name = None;
     }
 
-    let route_code;
-    if masks.contains("routeCode") {
+    let route_code = if masks.contains("routeCode") {
         let code = read_utf8(cursor)?;
-        route_code = Some(code);
+        Some(code)
     } else {
-        route_code = None;
-    }
+        None
+    };
     let _crc32 = cursor.read_u32::<BigEndian>()?;
     let end_position = cursor.position();
-    if packet_length as u64 != (end_position - start_position) {
+    if u64::from(packet_length) != (end_position - start_position) {
         panic!("Packet length doesn't match");
     }
 
     let event = Event {
         status: Some(status),
-        test_id: test_id,
-        timestamp: timestamp,
-        tags: tags,
-        file_content: file_content,
-        file_name: file_name,
-        mime_type: mime_type,
-        route_code: route_code,
+        test_id,
+        timestamp,
+        tags,
+        file_content,
+        file_name,
+        mime_type,
+        route_code,
     };
-    return Result::Ok(event);
+    Result::Ok(event)
 }
 
 pub fn parse_subunit<T: Read>(mut reader: T) -> GenResult<Vec<Event>> {
@@ -341,7 +338,7 @@ pub fn parse_subunit<T: Read>(mut reader: T) -> GenResult<Vec<Event>> {
         let packet = read_packet(cursor)?;
         output.push(packet);
     }
-    return Result::Ok(output);
+    Result::Ok(output)
 }
 
 pub struct Event {
@@ -393,25 +390,25 @@ impl Event {
         buffer.write_u16::<BigEndian>(flags)?;
         buffer = write_number(length as u32, buffer)?;
 
-        buffer.write(&timestamp)?;
-        buffer.write(&test_id)?;
-        buffer.write(&tags)?;
-        buffer.write(&mime_type)?;
-        buffer.write(&file_content)?;
-        buffer.write(&routing_code)?;
+        buffer.write_all(&timestamp)?;
+        buffer.write_all(&test_id)?;
+        buffer.write_all(&tags)?;
+        buffer.write_all(&mime_type)?;
+        buffer.write_all(&file_content)?;
+        buffer.write_all(&routing_code)?;
         // Flush buffer into output and digest to calculate crc32
         let mut digest = crc32::Digest::new(crc32::IEEE);
         digest.write(&buffer);
-        writer.write(&buffer)?;
+        writer.write_all(&buffer)?;
         writer.write_u32::<BigEndian>(digest.sum32())?;
-        return Result::Ok(writer);
+        Result::Ok(writer)
     }
     fn make_routing_code(&self) -> GenResult<Vec<u8>> {
         let mut routing_code: Vec<u8> = Vec::new();
         if self.route_code.is_some() {
             routing_code = write_utf8(self.route_code.as_ref().unwrap(), routing_code)?;
         }
-        return Result::Ok(routing_code);
+        Result::Ok(routing_code)
     }
 
     fn make_file_content(&self) -> GenResult<Vec<u8>> {
@@ -427,7 +424,7 @@ impl Event {
                 Option::None => (), // missing body is ok ?
             }
         }
-        return Result::Ok(file_content);
+        Result::Ok(file_content)
     }
 
     fn make_mime_type(&self) -> GenResult<Vec<u8>> {
@@ -435,7 +432,7 @@ impl Event {
         if self.mime_type.is_some() {
             mime_type = write_utf8(self.mime_type.as_ref().unwrap(), mime_type)?;
         }
-        return Result::Ok(mime_type);
+        Result::Ok(mime_type)
     }
 
     fn make_tags(&self) -> GenResult<Vec<u8>> {
@@ -447,7 +444,7 @@ impl Event {
                 tags = write_utf8(tag, tags)?;
             }
         }
-        return Result::Ok(tags);
+        Result::Ok(tags)
     }
 
     fn make_test_id(&self) -> GenResult<Vec<u8>> {
@@ -456,7 +453,7 @@ impl Event {
             let raw_id = self.test_id.as_ref().unwrap();
             test_id = write_utf8(raw_id, test_id)?;
         }
-        return Result::Ok(test_id);
+        Result::Ok(test_id)
     }
 
     fn make_timestamp(&self) -> GenResult<Vec<u8>> {
@@ -494,7 +491,7 @@ impl Event {
         if self.route_code.is_some() {
             flags |= flag_masks("routeCode")?;
         }
-        return Result::Ok(flags);
+        Result::Ok(flags)
     }
 }
 
