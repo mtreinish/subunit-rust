@@ -11,6 +11,7 @@
 // limitations under the License.
 
 #![deny(warnings)]
+#![allow(clippy::cargo)]
 #![allow(clippy::unreadable_literal)]
 
 extern crate byteorder;

@@ -42,4 +42,6 @@ install:
 build: false
 
 test_script:
+  - cargo fmt --all -- --check
+  - cargo clippy
   - cargo test --verbose --all
