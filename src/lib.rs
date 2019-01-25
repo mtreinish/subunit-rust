@@ -278,7 +278,7 @@ fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
         }
         Some(tags_vec)
     } else {
-         None
+        None
     };
     let mime_type = if masks.contains("mimeType") {
         let mime = read_utf8(cursor)?;
