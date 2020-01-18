@@ -35,7 +35,7 @@ pub struct InvalidFlag;
 #[derive(Debug, Clone)]
 pub struct InvalidMask;
 
-type GenError = Box<Error>;
+type GenError = Box<dyn Error>;
 type GenResult<T> = Result<T, GenError>;
 
 const SIGNATURE: u8 = 0xb3;
@@ -51,7 +51,7 @@ impl Error for SizeError {
         "Value is too large to encode"
     }
 
-    fn cause(&self) -> Option<&Error> {
+    fn cause(&self) -> Option<&dyn Error> {
         None
     }
 }
@@ -67,7 +67,7 @@ impl Error for InvalidMask {
         "Mask code is valid"
     }
 
-    fn cause(&self) -> Option<&Error> {
+    fn cause(&self) -> Option<&dyn Error> {
         None
     }
 }
@@ -83,7 +83,7 @@ impl Error for InvalidFlag {
         "Flag code is invalid"
     }
 
-    fn cause(&self) -> Option<&Error> {
+    fn cause(&self) -> Option<&dyn Error> {
         None
     }
 }
