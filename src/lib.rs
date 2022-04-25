@@ -103,7 +103,7 @@ fn flag_to_status(flag: u8) -> Result<String, InvalidFlag> {
 }
 
 fn status_to_flag(status: &str) -> Result<u16, InvalidFlag> {
-    if status == "" {
+    if status.is_empty() {
         Result::Ok(0x0)
     } else if status == "exists" {
         Result::Ok(0x1)
@@ -262,13 +262,12 @@ fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
     } else {
         None
     };
-    let test_id;
-    if masks.contains("testId") {
+    let test_id = if masks.contains("testId") {
         let id = read_utf8(cursor)?;
-        test_id = Some(id)
+        Some(id)
     } else {
-        test_id = None;
-    }
+        None
+    };
     let tags = if masks.contains("tags") {
         let count = read_number(cursor)?;
         let mut tags_vec: Vec<String> = Vec::new();
@@ -419,7 +418,7 @@ impl Event {
                     file_content = write_utf8(self.file_name.as_ref().unwrap(), file_content)?;
                     let len = self.file_content.as_ref().unwrap().len();
                     file_content = write_number(len as u32, file_content)?;
-                    file_content.write_all(&body)?;
+                    file_content.write_all(body)?;
                 }
                 Option::None => (), // missing body is ok ?
             }
@@ -468,7 +467,7 @@ impl Event {
     }
 
     fn make_flags(&self) -> GenResult<u16> {
-        let mut flags = 0x2000 as u16; // version 0x2
+        let mut flags = 0x2000_u16; // version 0x2
         if self.status.is_some() {
             flags |= status_to_flag(self.status.as_ref().unwrap())?;
         }
