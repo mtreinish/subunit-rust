@@ -15,4 +15,4 @@ travis-ci = {repository = "mtreinish/subunit-rust"}
 [dependencies]
 chrono = "0.4.11"
 byteorder = "1.3"
-crc = "^1.0.0"
+crc32fast = "1.3"
