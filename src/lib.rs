@@ -15,7 +15,7 @@
 
 extern crate byteorder;
 extern crate chrono;
-extern crate crc;
+extern crate crc32fast;
 
 use std::collections::HashSet;
 use std::error::Error;
@@ -26,7 +26,6 @@ use std::io::Write;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use chrono::prelude::*;
-use crc::{crc32, Hasher32};
 
 #[derive(Debug, Clone)]
 pub struct SizeError;
@@ -396,10 +395,9 @@ impl Event {
         buffer.write_all(&file_content)?;
         buffer.write_all(&routing_code)?;
         // Flush buffer into output and digest to calculate crc32
-        let mut digest = crc32::Digest::new(crc32::IEEE);
-        digest.write(&buffer);
+        let checksum = crc32fast::hash(&buffer);
         writer.write_all(&buffer)?;
-        writer.write_u32::<BigEndian>(digest.sum32())?;
+        writer.write_u32::<BigEndian>(checksum)?;
         Result::Ok(writer)
     }
     fn make_routing_code(&self) -> GenResult<Vec<u8>> {
