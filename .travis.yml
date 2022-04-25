@@ -1,5 +1,0 @@
-language: rust
-rust:
-  - stable
-matrix:
-  fast_finish: true
