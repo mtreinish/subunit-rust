@@ -213,22 +213,22 @@ pub fn read_number(reader: &mut Cursor<Vec<u8>>) -> GenResult<u32> {
     let mut value = u32::from(first) & 0x3f;
     // 0b00, 1 octet
     if number_type == 0x00 {
-        Result::Ok(value as u32)
+        Result::Ok(value)
     // 0b01, 2octets
     } else if number_type == 0x40 {
         let suffix = reader.read_u8()?;
         value = (value << 8) | u32::from(suffix);
-        Result::Ok(value as u32)
+        Result::Ok(value)
     // 0b10, 3 octets
     } else if number_type == 0x80 {
         let suffix = reader.read_u16::<BigEndian>()?;
         value = (value << 16) | u32::from(suffix);
-        Result::Ok(value as u32)
+        Result::Ok(value)
     // 0b11, 4 octets
     } else {
         let suffix = reader.read_u32::<BigEndian>()?;
         value = (value << 24) | suffix;
-        Result::Ok(value as u32)
+        Result::Ok(value)
     }
 }
 
@@ -410,15 +410,12 @@ impl Event {
 
     fn make_file_content(&self) -> GenResult<Vec<u8>> {
         let mut file_content: Vec<u8> = Vec::new();
-        if self.file_name.is_some() {
-            match self.file_content {
-                Option::Some(ref body) => {
-                    file_content = write_utf8(self.file_name.as_ref().unwrap(), file_content)?;
-                    let len = self.file_content.as_ref().unwrap().len();
-                    file_content = write_number(len as u32, file_content)?;
-                    file_content.write_all(body)?;
-                }
-                Option::None => (), // missing body is ok ?
+        if let Some(file_name) = self.file_name.as_ref() {
+            if let Option::Some(ref body) = self.file_content {
+                file_content = write_utf8(file_name, file_content)?;
+                let len = self.file_content.as_ref().unwrap().len();
+                file_content = write_number(len as u32, file_content)?;
+                file_content.write_all(body)?;
             }
         }
         Result::Ok(file_content)
