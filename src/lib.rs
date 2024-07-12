@@ -257,7 +257,7 @@ fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
     let timestamp = if masks.contains("timestamp") {
         let seconds = cursor.read_u32::<BigEndian>()?;
         let nanos = read_number(cursor)?;
-        Some(Utc.timestamp(i64::from(seconds), nanos))
+        Some(Utc.timestamp_opt(i64::from(seconds), nanos).unwrap())
     } else {
         None
     };
