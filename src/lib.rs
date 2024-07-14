@@ -10,12 +10,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-use std::error::Error;
-use std::fmt;
-use std::io::Cursor;
-use std::io::Read;
-use std::io::Write;
+use std::{
+    collections::HashSet,
+    error::Error,
+    fmt,
+    io::{Cursor, Read, Write},
+};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone as _, Utc};
