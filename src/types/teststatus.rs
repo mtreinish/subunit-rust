@@ -1,5 +1,4 @@
 //! Test status enum and conversion to/from u16.
-//!
 
 /// Status of a test case.
 /// [Docs](https://github.com/testing-cabal/subunit/blob/fc698775674fcbdb9fcc8286d8358c7185647db4/README.rst?plain=1#L287)
