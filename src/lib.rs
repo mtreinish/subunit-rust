@@ -10,9 +10,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(clippy::cargo)]
-#![allow(clippy::unreadable_literal)]
-
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
