@@ -21,7 +21,7 @@ use std::io::Read;
 use std::io::Write;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use chrono::prelude::*;
+use chrono::{DateTime, TimeZone as _, Utc};
 
 #[derive(Debug, Clone)]
 pub struct SizeError;
