@@ -13,10 +13,6 @@
 #![allow(clippy::cargo)]
 #![allow(clippy::unreadable_literal)]
 
-extern crate byteorder;
-extern crate chrono;
-extern crate crc32fast;
-
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
