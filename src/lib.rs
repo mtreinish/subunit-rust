@@ -10,6 +10,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod types {
+    pub mod teststatus;
+}
+
 use std::{
     collections::HashSet,
     error::Error,
@@ -20,10 +24,10 @@ use std::{
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone as _, Utc};
 
+use types::teststatus::TestStatus;
+
 #[derive(Debug, Clone)]
 pub struct SizeError;
-#[derive(Debug, Clone)]
-pub struct InvalidFlag;
 #[derive(Debug, Clone)]
 pub struct InvalidMask;
 
@@ -61,58 +65,6 @@ impl Error for InvalidMask {
 
     fn cause(&self) -> Option<&dyn Error> {
         None
-    }
-}
-
-impl fmt::Display for InvalidFlag {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Flag code is invalid")
-    }
-}
-
-impl Error for InvalidFlag {
-    fn description(&self) -> &str {
-        "Flag code is invalid"
-    }
-
-    fn cause(&self) -> Option<&dyn Error> {
-        None
-    }
-}
-
-fn flag_to_status(flag: u8) -> Result<String, InvalidFlag> {
-    match flag {
-        0x0 => Result::Ok("".to_string()),
-        0x1 => Result::Ok("exists".to_string()),
-        0x2 => Result::Ok("inprogress".to_string()),
-        0x3 => Result::Ok("success".to_string()),
-        0x4 => Result::Ok("uxsuccess".to_string()),
-        0x5 => Result::Ok("skip".to_string()),
-        0x6 => Result::Ok("fail".to_string()),
-        0x7 => Result::Ok("xfail".to_string()),
-        _ => Result::Err(InvalidFlag),
-    }
-}
-
-fn status_to_flag(status: &str) -> Result<u16, InvalidFlag> {
-    if status.is_empty() {
-        Result::Ok(0x0)
-    } else if status == "exists" {
-        Result::Ok(0x1)
-    } else if status == "inprogress" {
-        Result::Ok(0x2)
-    } else if status == "success" {
-        Result::Ok(0x3)
-    } else if status == "uxsuccess" {
-        Result::Ok(0x4)
-    } else if status == "skip" {
-        Result::Ok(0x5)
-    } else if status == "fail" {
-        Result::Ok(0x6)
-    } else if status == "xfail" {
-        Result::Ok(0x7)
-    } else {
-        Result::Err(InvalidFlag)
     }
 }
 
@@ -244,7 +196,7 @@ fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
     if sig != SIGNATURE {
         panic!("Invalid signature");
     }
-    let status = flag_to_status((flags & 0x0007) as u8)?;
+    let status = flags.into();
     let masks = flags_to_masks(flags)?;
 
     let timestamp = if masks.contains("timestamp") {
@@ -307,7 +259,7 @@ fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
     }
 
     let event = Event {
-        status: Some(status),
+        status,
         test_id,
         timestamp,
         tags,
@@ -333,7 +285,7 @@ pub fn parse_subunit<T: Read>(mut reader: T) -> GenResult<Vec<Event>> {
 }
 
 pub struct Event {
-    pub status: Option<String>,
+    pub status: TestStatus,
     pub test_id: Option<String>,
     pub timestamp: Option<DateTime<Utc>>,
     pub file_name: Option<String>,
@@ -456,9 +408,8 @@ impl Event {
 
     fn make_flags(&self) -> GenResult<u16> {
         let mut flags = 0x2000_u16; // version 0x2
-        if self.status.is_some() {
-            flags |= status_to_flag(self.status.as_ref().unwrap())?;
-        }
+
+        flags |= self.status as u16;
 
         if self.timestamp.is_some() {
             flags |= flag_masks("timestamp")?;
@@ -489,7 +440,7 @@ mod tests {
     #[test]
     fn test_write_event() {
         let mut event = Event {
-            status: Some("inprogress".to_string()),
+            status: TestStatus::InProgress,
             test_id: Some("A_test_id".to_string()),
             timestamp: Some(Utc.with_ymd_and_hms(2014, 7, 8, 9, 10, 11).unwrap()),
             tags: Some(vec!["tag_a".to_string(), "tag_b".to_string()]),
@@ -521,7 +472,7 @@ mod tests {
     #[test]
     fn test_write_full_test_event_with_file_content() {
         let mut event = Event {
-            status: Some("inprogress".to_string()),
+            status: TestStatus::InProgress,
             test_id: Some("A_test_id".to_string()),
             timestamp: Some(Utc.with_ymd_and_hms(2014, 7, 8, 9, 10, 11).unwrap()),
             tags: Some(vec!["tag_a".to_string(), "tag_b".to_string()]),
@@ -531,7 +482,7 @@ mod tests {
             route_code: None,
         };
         let mut event_a = Event {
-            status: Some("fail".to_string()),
+            status: TestStatus::Failed,
             test_id: Some("A_test_id".to_string()),
             timestamp: Some(Utc.with_ymd_and_hms(2014, 7, 8, 9, 12, 1).unwrap()),
             tags: Some(vec!["tag_a".to_string(), "tag_b".to_string()]),
