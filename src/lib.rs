@@ -11,11 +11,11 @@
 // limitations under the License.
 
 pub mod types {
+    pub mod eventfeatures;
     pub mod teststatus;
 }
 
 use std::{
-    collections::HashSet,
     error::Error,
     fmt,
     io::{Cursor, Read, Write},
@@ -23,13 +23,13 @@ use std::{
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{DateTime, TimeZone as _, Utc};
+use enumset::EnumSet;
 
+use types::eventfeatures::EventFeatures;
 use types::teststatus::TestStatus;
 
 #[derive(Debug, Clone)]
 pub struct SizeError;
-#[derive(Debug, Clone)]
-pub struct InvalidMask;
 
 type GenError = Box<dyn Error>;
 type GenResult<T> = Result<T, GenError>;
@@ -50,65 +50,6 @@ impl Error for SizeError {
     fn cause(&self) -> Option<&dyn Error> {
         None
     }
-}
-
-impl fmt::Display for InvalidMask {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Mask code is invalid")
-    }
-}
-
-impl Error for InvalidMask {
-    fn description(&self) -> &str {
-        "Mask code is valid"
-    }
-
-    fn cause(&self) -> Option<&dyn Error> {
-        None
-    }
-}
-
-fn flag_masks(masks: &str) -> Result<u16, InvalidMask> {
-    match masks {
-        "testId" => Result::Ok(0x0800),
-        "routeCode" => Result::Ok(0x0400),
-        "timestamp" => Result::Ok(0x0200),
-        "runnable" => Result::Ok(0x0100),
-        "tags" => Result::Ok(0x0080),
-        "mimeType" => Result::Ok(0x0020),
-        "eof" => Result::Ok(0x0010),
-        "fileContent" => Result::Ok(0x0040),
-        _ => Result::Err(InvalidMask),
-    }
-}
-
-fn flags_to_masks(flags: u16) -> GenResult<HashSet<String>> {
-    let static_flags: [u16; 8] = [
-        0x0800, 0x0400, 0x0200, 0x0100, 0x0080, 0x0020, 0x0010, 0x0040,
-    ];
-    let mut masks: HashSet<String> = HashSet::new();
-    for flag in static_flags.iter() {
-        if flags & *flag != 0 {
-            if *flag == 0x0800 {
-                masks.insert("testId".to_string());
-            } else if *flag == 0x0400 {
-                masks.insert("routeCode".to_string());
-            } else if *flag == 0x0200 {
-                masks.insert("timestamp".to_string());
-            } else if *flag == 0x0100 {
-                masks.insert("runnable".to_string());
-            } else if *flag == 0x0080 {
-                masks.insert("tags".to_string());
-            } else if *flag == 0x0020 {
-                masks.insert("mimeType".to_string());
-            } else if *flag == 0x0010 {
-                masks.insert("eof".to_string());
-            } else if *flag == 0x0040 {
-                masks.insert("fileContent".to_string());
-            }
-        }
-    }
-    Result::Ok(masks)
 }
 
 fn write_number<T: Write>(value: u32, mut ret: T) -> GenResult<T> {
@@ -197,22 +138,25 @@ fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
         panic!("Invalid signature");
     }
     let status = flags.into();
-    let masks = flags_to_masks(flags)?;
+    let masks = EnumSet::<EventFeatures>::from_repr_truncated(flags);
+    if flags >> 12 != 0x2 {
+        panic!("Invalid version {:#02x}", flags >> 12);
+    }
 
-    let timestamp = if masks.contains("timestamp") {
+    let timestamp = if masks.contains(EventFeatures::Timestamp) {
         let seconds = cursor.read_u32::<BigEndian>()?;
         let nanos = read_number(cursor)?;
         Some(Utc.timestamp_opt(i64::from(seconds), nanos).unwrap())
     } else {
         None
     };
-    let test_id = if masks.contains("testId") {
+    let test_id = if masks.contains(EventFeatures::TestId) {
         let id = read_utf8(cursor)?;
         Some(id)
     } else {
         None
     };
-    let tags = if masks.contains("tags") {
+    let tags = if masks.contains(EventFeatures::Tags) {
         let count = read_number(cursor)?;
         let mut tags_vec: Vec<String> = Vec::new();
         for _i in 0..count {
@@ -223,7 +167,7 @@ fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
     } else {
         None
     };
-    let mime_type = if masks.contains("mimeType") {
+    let mime_type = if masks.contains(EventFeatures::FileMimeType) {
         let mime = read_utf8(cursor)?;
         Some(mime)
     } else {
@@ -231,7 +175,7 @@ fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
     };
     let file_content;
     let file_name;
-    if masks.contains("fileContent") {
+    if masks.contains(EventFeatures::FileContent) {
         let name = read_utf8(cursor)?;
         file_name = Some(name);
         let file_length = read_number(cursor)?;
@@ -246,7 +190,7 @@ fn read_packet(cursor: &mut Cursor<Vec<u8>>) -> GenResult<Event> {
         file_name = None;
     }
 
-    let route_code = if masks.contains("routeCode") {
+    let route_code = if masks.contains(EventFeatures::RoutingCode) {
         let code = read_utf8(cursor)?;
         Some(code)
     } else {
@@ -284,6 +228,7 @@ pub fn parse_subunit<T: Read>(mut reader: T) -> GenResult<Vec<Event>> {
     Result::Ok(output)
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Event {
     pub status: TestStatus,
     pub test_id: Option<String>,
@@ -299,7 +244,7 @@ impl Event {
     pub fn write<T: Write>(&mut self, mut writer: T) -> GenResult<T> {
         //  PACKET = SIGNATURE FLAGS PACKET_LENGTH TIMESTAMP? TESTID? TAGS?
         //           MIME? FILECONTENT? ROUTING_CODE? CRC32
-        let flags = self.make_flags()?;
+        let flags = self.make_flags();
         let timestamp = self.make_timestamp()?;
         let test_id = self.make_test_id()?;
         let tags = self.make_tags()?;
@@ -345,6 +290,7 @@ impl Event {
         writer.write_u32::<BigEndian>(checksum)?;
         Result::Ok(writer)
     }
+
     fn make_routing_code(&self) -> GenResult<Vec<u8>> {
         let mut routing_code: Vec<u8> = Vec::new();
         if self.route_code.is_some() {
@@ -406,30 +352,31 @@ impl Event {
         Result::Ok(timestamp)
     }
 
-    fn make_flags(&self) -> GenResult<u16> {
-        let mut flags = 0x2000_u16; // version 0x2
-
-        flags |= self.status as u16;
+    fn make_flags(&self) -> u16 {
+        let mut flags = EnumSet::new();
 
         if self.timestamp.is_some() {
-            flags |= flag_masks("timestamp")?;
+            flags |= EventFeatures::Timestamp;
         }
         if self.test_id.is_some() {
-            flags |= flag_masks("testId")?;
+            flags |= EventFeatures::TestId;
         }
         if self.tags.is_some() {
-            flags |= flag_masks("tags")?;
+            flags |= EventFeatures::Tags;
         }
         if self.mime_type.is_some() {
-            flags |= flag_masks("mimeType")?;
+            flags |= EventFeatures::FileMimeType;
         }
         if self.file_name.is_some() && self.file_content.is_some() {
-            flags |= flag_masks("fileContent")?;
+            flags |= EventFeatures::FileContent;
         }
         if self.route_code.is_some() {
-            flags |= flag_masks("routeCode")?;
+            flags |= EventFeatures::RoutingCode;
         }
-        Result::Ok(flags)
+
+        let version = 0x2000_u16; // version 0x2
+
+        version | flags.as_repr() | self.status as u16
     }
 }
 
@@ -469,6 +416,7 @@ mod tests {
         assert_eq!(event.mime_type, out_event.mime_type);
         assert_eq!(event.route_code, out_event.route_code);
     }
+
     #[test]
     fn test_write_full_test_event_with_file_content() {
         let mut event = Event {
