@@ -14,12 +14,17 @@ version = "0.2.0"
 async = ["dep:async-stream", "dep:tokio", "dep:tokio-stream"]
 default = ["async", "sync"]
 sync = []
+v1 = ["dep:winnow"]
 
 [dependencies]
 async-stream = { version = "0.3", optional = true }
-chrono = "0.4.11"
+chrono = "0.4.38"
 crc32fast = "1.3"
 enumset = "1.1.3"
 thiserror = "1.0.62"
 tokio = { version = "1.0", optional = true, features = ["full"] }
 tokio-stream = { version = "0.1", optional = true }
+winnow = { version = "0.6.16", optional = true, features = [] }
+
+[dev-dependencies]
+tokio-util = { version = "0.7.11" }
