@@ -10,11 +10,14 @@ use std::{fmt::Debug, mem};
 
 use async_stream::stream;
 use chrono::{DateTime, Utc};
-use tokio::io::{AsyncBufRead, AsyncBufReadExt as _};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt as _, AsyncWriteExt};
 use tokio_stream::Stream;
 use winnow::BStr;
 
-use crate::Error;
+use crate::{
+    io::{r#async::WriteIntoAsync, sync::WriteInto},
+    Error,
+};
 
 /// The default content details for simple bracketed details
 pub static TRACEBACK_NAME: &str = "traceback";
@@ -71,6 +74,217 @@ impl Event {
             .map(|s| Event::Text(s))
             .unwrap_or_else(|e| Event::Bytes(e.into_bytes()))
     }
+
+    fn write_parts(writer: &mut dyn std::io::Write, parts: &Vec<Part>) -> std::io::Result<()> {
+        if parts.is_empty() {
+            writer.write_all(b"\n")
+        } else {
+            write!(writer, " [ multipart\n")?;
+            for part in parts {
+                <Part as WriteInto>::write_into(part, writer)?;
+            }
+            writer.write_all(b"]\n")
+        }
+    }
+
+    async fn write_parts_async(
+        writer: &mut (dyn tokio::io::AsyncWrite + Send + Unpin),
+        cmd: &str,
+        name: &str,
+        parts: &Vec<Part>,
+    ) -> std::io::Result<()> {
+        writer.write_all(cmd.as_bytes()).await?;
+        writer.write_all(name.as_bytes()).await?;
+        if parts.is_empty() {
+            writer.write_all(b"\n").await
+        } else {
+            writer.write_all(b" [ multipart\n").await?;
+            for part in parts {
+                <Part as WriteIntoAsync>::write_into(part, writer).await?;
+            }
+            writer.write_all(b"]\n").await
+        }
+    }
+}
+
+struct TagsIter<'s, I>(std::iter::Peekable<I>)
+where
+    I: Iterator<Item = (&'s str, &'s str)> + Send;
+
+impl<'s, I> Iterator for TagsIter<'s, I>
+where
+    I: Iterator<Item = (&'s str, &'s str)> + Send,
+{
+    type Item = (bool, I::Item);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|e| (self.0.peek().is_none(), e))
+    }
+}
+
+impl WriteInto for Event {
+    fn write_into(&self, writer: &mut dyn std::io::Write) -> std::io::Result<()> {
+        match self {
+            Event::TestStart(name) => write!(writer, "test: {name}\n"),
+            Event::TestSuccess(name, parts) => {
+                write!(writer, "success: {name}")?;
+                Event::write_parts(writer, parts)
+            }
+            Event::TestFailure(name, parts) => {
+                write!(writer, "failure: {name}")?;
+                Event::write_parts(writer, parts)
+            }
+            Event::TestError(name, parts) => {
+                write!(writer, "error: {name}")?;
+                Event::write_parts(writer, parts)
+            }
+            Event::TestSkip(name, parts) => {
+                write!(writer, "skip: {name}")?;
+                Event::write_parts(writer, parts)
+            }
+            Event::TestExpectedFailure(name, parts) => {
+                write!(writer, "xfail: {name}")?;
+                Event::write_parts(writer, parts)
+            }
+            Event::TestUnexpectedSuccess(name, parts) => {
+                write!(writer, "uxsuccess: {name}")?;
+                Event::write_parts(writer, parts)
+            }
+
+            Event::ProgressPush => write!(writer, "progress: push\n"),
+            Event::ProgressPop => write!(writer, "progress: pop\n"),
+            Event::ProgressSet(v) => write!(writer, "progress: {v}\n"),
+            Event::ProgressCurrent(v) => {
+                if *v >= 0 {
+                    write!(writer, "progress: +{v}\n")
+                } else {
+                    write!(writer, "progress: {v}\n")
+                }
+            }
+            Event::Text(t) => write!(writer, "{t}\n"),
+            Event::Bytes(b) => writer.write_all(&b),
+            Event::Tags(added, removed) => {
+                write!(writer, "tags: ")?;
+                let iter = TagsIter(
+                    added
+                        .iter()
+                        .map(|t| ("", t.as_str()))
+                        .chain(removed.iter().map(|t| ("-", t.as_str())))
+                        .peekable(),
+                );
+                for (last, (prefix, tag)) in iter {
+                    write!(writer, "{prefix}{tag}")?;
+
+                    if !last {
+                        write!(writer, " ")?;
+                    }
+                }
+                write!(writer, "\n")
+            }
+            Event::Time(t) => {
+                write!(
+                    writer,
+                    "time: {}\n",
+                    t.naive_utc().format("%Y-%m-%d %H:%M:%SZ")
+                )
+            }
+            Event::EndOfStream => Ok(()),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl WriteIntoAsync for Event {
+    async fn write_into(
+        &self,
+        writer: &mut (dyn tokio::io::AsyncWrite + Send + Unpin),
+    ) -> std::io::Result<()> {
+        match self {
+            Event::TestStart(name) => {
+                writer.write_all("test: ".as_bytes()).await?;
+                writer.write_all(name.as_bytes()).await?;
+                writer.write_all(b"\n").await
+            }
+
+            Event::TestSuccess(name, parts) => {
+                Event::write_parts_async(writer, "success: ", name, parts).await
+            }
+
+            Event::TestFailure(name, parts) => {
+                Event::write_parts_async(writer, "failure: ", name, parts).await
+            }
+            Event::TestError(name, parts) => {
+                Event::write_parts_async(writer, "error: ", name, parts).await
+            }
+            Event::TestSkip(name, parts) => {
+                Event::write_parts_async(writer, "skip: ", name, parts).await
+            }
+            Event::TestExpectedFailure(name, parts) => {
+                Event::write_parts_async(writer, "xfail: ", name, parts).await
+            }
+            Event::TestUnexpectedSuccess(name, parts) => {
+                Event::write_parts_async(writer, "uxsuccess: ", name, parts).await
+            }
+
+            Event::ProgressPush => writer.write_all("progress: push\n".as_bytes()).await,
+            Event::ProgressPop => writer.write_all("progress: pop\n".as_bytes()).await,
+            Event::ProgressSet(v) => {
+                writer.write_all("progress: ".as_bytes()).await?;
+                writer.write_all(v.to_string().as_bytes()).await?;
+                writer.write_all(b"\n").await
+            }
+            Event::ProgressCurrent(v) => {
+                if *v >= 0 {
+                    writer.write_all("progress: +".as_bytes()).await?;
+                    writer.write_all(v.to_string().as_bytes()).await?;
+                    writer.write_all(b"\n").await
+                } else {
+                    writer.write_all("progress: ".as_bytes()).await?;
+                    writer.write_all(v.to_string().as_bytes()).await?;
+                    writer.write_all(b"\n").await
+                }
+            }
+            Event::Text(t) => {
+                writer.write_all(t.as_bytes()).await?;
+                writer.write_all(b"\n").await
+            }
+            Event::Bytes(b) => writer.write_all(&b).await,
+            Event::Tags(added, removed) => {
+                writer.write_all("tags: ".as_bytes()).await?;
+                let last = added.len() + removed.len() - 1;
+                let mut pos = 0;
+                for tag in added {
+                    writer.write_all(tag.as_bytes()).await?;
+                    if last != pos {
+                        writer.write_all(b" ").await?;
+                    }
+                    pos += 1;
+                }
+                for tag in removed {
+                    writer.write_all(b"-").await?;
+                    writer.write_all(tag.as_bytes()).await?;
+                    if last != pos {
+                        writer.write_all(b" ").await?;
+                    }
+                    pos += 1;
+                }
+                writer.write_all(b"\n").await
+            }
+            Event::Time(t) => {
+                writer.write_all("time: ".as_bytes()).await?;
+                writer
+                    .write_all(
+                        t.naive_utc()
+                            .format("%Y-%m-%d %H:%M:%SZ")
+                            .to_string()
+                            .as_bytes(),
+                    )
+                    .await?;
+                writer.write_all(b"\n").await
+            }
+            Event::EndOfStream => Ok(()),
+        }
+    }
 }
 
 /// A single chunk of a test status file
@@ -102,6 +316,40 @@ impl Debug for Part {
             .field("name", &self.name)
             .field("bytes", &BStr::new(&self.bytes))
             .finish()
+    }
+}
+
+impl WriteInto for Part {
+    fn write_into(&self, writer: &mut dyn std::io::Write) -> std::io::Result<()> {
+        write!(writer, "Content-Type: {}\n", self.content_type)?;
+        write!(writer, "{}\n", self.name)?;
+        if !self.bytes.is_empty() {
+            write!(writer, "{}\r\n", self.bytes.len())?;
+            writer.write_all(&self.bytes)?;
+        }
+        write!(writer, "0\r\n")
+    }
+}
+
+#[async_trait::async_trait]
+impl WriteIntoAsync for Part {
+    async fn write_into(
+        &self,
+        writer: &mut (dyn tokio::io::AsyncWrite + Send + Unpin),
+    ) -> std::io::Result<()> {
+        writer.write_all("Content-Type: ".as_bytes()).await?;
+        writer.write_all(self.content_type.as_bytes()).await?;
+        writer.write_all("\n".as_bytes()).await?;
+        writer.write_all(self.name.as_bytes()).await?;
+        writer.write_all("\n".as_bytes()).await?;
+        if !self.bytes.is_empty() {
+            writer
+                .write_all(self.bytes.len().to_string().as_bytes())
+                .await?;
+            writer.write_all("\r\n".as_bytes()).await?;
+            writer.write_all(&self.bytes).await?;
+        }
+        writer.write_all("0\r\n".as_bytes()).await
     }
 }
 
@@ -555,7 +803,6 @@ pub struct TestProtocolServer<'a> {
 
 impl<'a> TestProtocolServer<'a> {
     async fn next(&mut self) -> Result<Event, crate::Error> {
-        eprintln!("next");
         let mut buf = vec![];
         // parse the command using winnow
         loop {
@@ -567,8 +814,7 @@ impl<'a> TestProtocolServer<'a> {
                 return self.generate_end_of_stream();
             }
 
-            eprintln!("Parsing:");
-            let mut input = dbg!(BStr::new(&buf));
+            let mut input = BStr::new(&buf);
 
             match &self.state {
                 ParseState::InTest(test_name) => {
@@ -680,8 +926,12 @@ mod tests {
     use chrono::NaiveDate;
     use tokio::io::AsyncReadExt;
     use tokio_stream::StreamExt;
+    use winnow::BStr;
 
-    use crate::v1::{Event, Part, TRACEBACK_NAME, X_TRACEBACK};
+    use crate::{
+        io::{r#async::WriteIntoAsync, sync::WriteInto},
+        v1::{Event, Part, TRACEBACK_NAME, X_TRACEBACK},
+    };
 
     async fn parse_stream(mut stream: &[u8]) -> Vec<super::Event> {
         let stream: &mut dyn super::SubunitStream = &mut stream;
@@ -1086,5 +1336,52 @@ mod tests {
             ],
             &events[..]
         );
+    }
+
+    #[tokio::test]
+    async fn round_trip() {
+        let stream = [
+            &b"time: 2001-12-12 12:59:59Z\n"[..],
+            &b"tags: foo bar:baz -quux\n"[..],
+            &b"test: old mcdonald\n"[..],
+            &b"success: old mcdonald\n"[..],
+            &b"progress: push\n"[..],
+            &b"progress: 23\n"[..],
+            &b"progress: -2\n"[..],
+            &b"progress: pop\n"[..],
+            // &b"test: old mcdonald\n"[..], // always serialises as multipart
+            // &b"success: old mcdonald [\n"[..],
+            // &b"foo\n"[..],
+            // &b"]\n"[..],
+            &b"test: old mcdonald\n"[..],
+            &b"success: old mcdonald [ multipart\n"[..],
+            &b"Content-Type: type/sub-type;p=v\n"[..],
+            &b"example1\n"[..],
+            &b"4\r\n12340\r\n"[..],
+            &b"]\n"[..],
+            &b"test: old mcdonald\n"[..],
+            &b"success: old mcdonald [ multipart\n"[..],
+            &b"Content-Type: simple/text\n"[..],
+            &b"example1\n"[..],
+            &b"0\r\n"[..],
+            &b"]\n"[..],
+        ];
+        let input = stream.join(&[][..]);
+        let events = parse_stream(&input).await;
+        // sync
+        let mut output = vec![];
+        for event in &events {
+            <Event as WriteInto>::write_into(&event, &mut output).unwrap();
+        }
+        assert_eq!(BStr::new(&input), BStr::new(&output));
+
+        // async
+        let mut output = vec![];
+        for event in events {
+            <Event as WriteIntoAsync>::write_into(&event, &mut output)
+                .await
+                .unwrap();
+        }
+        assert_eq!(BStr::new(&input), BStr::new(&output));
     }
 }
