@@ -8,6 +8,16 @@ use tokio_stream::Stream;
 
 use crate::{deserialize::Deserializable, types::stream::ScannedItem, Error, GenError, GenResult};
 
+/// Ask a struct to write itself to some impl AsyncWrite
+#[async_trait::async_trait]
+pub trait WriteIntoAsync {
+    /// Write the struct to the writer
+    async fn write_into(
+        &self,
+        writer: &mut (dyn tokio::io::AsyncWrite + Send + Unpin),
+    ) -> std::io::Result<()>;
+}
+
 async fn next<R: AsyncReadExt + Unpin>(
     reader: &mut R,
     buffer: &mut VecDeque<u8>,

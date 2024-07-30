@@ -4,6 +4,12 @@ use std::{collections::VecDeque, io::Read};
 
 use crate::{deserialize::Deserializable, types::stream::ScannedItem, Error, GenResult};
 
+/// Ask a struct to write itself to some impl Write
+pub trait WriteInto {
+    /// Write the struct to the writer
+    fn write_into(&self, writer: &mut dyn std::io::Write) -> std::io::Result<()>;
+}
+
 /// Look for subunit events in an input stream.
 #[derive(Default, Debug)]
 pub struct Scanner<R> {
