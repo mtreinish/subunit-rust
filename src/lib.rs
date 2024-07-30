@@ -10,6 +10,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Implementation of the Subunit protocol in Rust. For the protocol definition,
+//! see the [Subunit Protocol
+//! Specification](https://github.com/testing-cabal/subunit/blob/main/README.rst).
+//! This crate contains both a v1 and v2 implementation of the protocol. v1 is
+//! disabled by default but can be enabled via the `v1` feature.
+
 pub mod types {
     pub mod event;
     pub mod eventfeatures;
@@ -31,13 +37,15 @@ pub mod constants {
     pub static NUMBER_VALUE_MASK: u8 = 0x3f;
     pub static VERSION2: u16 = 0x2000;
 }
+#[cfg(feature = "v1")]
+pub mod v1;
 
 use std::fmt::Debug;
 
 use thiserror::Error as ThisError;
 
 #[derive(ThisError)]
-enum Error {
+pub enum Error {
     #[error("Value is too large to encode")]
     TooLarge,
     #[error("Invalid packet header: size {} < header size {}", _0, _1)]
@@ -56,6 +64,22 @@ enum Error {
     CRC32Mismatch(u32, u32),
     #[error("Invalid timestamp secs: {} nsecs: {}", _0, _1)]
     InvalidTimestamp(u32, u32),
+    #[error("IO Error: {}", _0)]
+    IO(#[from] std::io::Error),
+    #[cfg(feature = "v1")]
+    #[error("V1 Parsing error: {:?}", _0)]
+    V1Parse(String),
+}
+
+#[cfg(feature = "v1")]
+impl<I, O> From<winnow::error::ParseError<I, O>> for Error
+where
+    I: std::fmt::Debug,
+    O: std::fmt::Debug,
+{
+    fn from(err: winnow::error::ParseError<I, O>) -> Self {
+        Error::V1Parse(format!("{:?}", err))
+    }
 }
 
 impl Debug for Error {
