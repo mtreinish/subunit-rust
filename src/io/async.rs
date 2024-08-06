@@ -22,15 +22,21 @@ async fn next<R: AsyncReadExt + Unpin>(
     reader: &mut R,
     buffer: &mut VecDeque<u8>,
 ) -> GenResult<Option<ScannedItem>> {
-    let buf = buffer.make_contiguous();
-    let mut required_bytes = match ScannedItem::required_bytes(buf) {
-        Ok(v) => v,
-        Err(e) => Err(GenError::from(e))?,
+    // VecDequeue doesn't reserve space, and like Read AsyncRead only uses
+    // allocated space (ReadBuf's intent aside). So we use VecDequeue to
+    // minimise overheads, but do not actually read into it.
+    let mut required_bytes = {
+        let buf = buffer.make_contiguous();
+        match ScannedItem::required_bytes(buf) {
+            Ok(v) => v,
+            Err(e) => Err(GenError::from(e))?,
+        }
     };
-    while buf.len() < required_bytes {
-        match reader.read(buf).await {
+    while buffer.len() < required_bytes {
+        let mut read_buffer = [0u8; 8192];
+        match reader.read(&mut read_buffer).await {
             Ok(0) => {
-                if buf.is_empty() {
+                if buffer.is_empty() {
                     return Ok(None);
                 }
 
@@ -40,19 +46,26 @@ async fn next<R: AsyncReadExt + Unpin>(
                     Error::InvalidUTF8Sequence.into(),
                 )));
             }
-            Ok(_) => (), // Might not be enough read yet
+            Ok(bytes_read) => {
+                // Might not be enough read yet
+                buffer.extend(read_buffer[..bytes_read].iter());
+            }
             Err(e) => Err(GenError::from(e))?,
         }
-        required_bytes = match ScannedItem::required_bytes(buf) {
-            Ok(v) => v,
-            Err(e) => Err(GenError::from(e))?,
-        };
+        {
+            let buf = buffer.make_contiguous();
+            required_bytes = match ScannedItem::required_bytes(buf) {
+                Ok(v) => v,
+                Err(e) => Err(GenError::from(e))?,
+            };
+        }
     }
 
     // Now we have enough data to do something with it.
 
     // TODO: scan rapidly and collect all UTF8 text in one go rather than depending on the optimiser to make it
     // efficient.
+    let buf = buffer.make_contiguous();
     match ScannedItem::deserialize(buf) {
         Ok((event, used)) => {
             buffer.drain(..used);
@@ -82,5 +95,39 @@ pub fn iter_stream<R: AsyncReadExt + Unpin>(
         while let Some(item) = next(&mut reader, &mut buffer).await? {
             yield item;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio_stream::StreamExt;
+
+    use crate::{
+        io::r#async::iter_stream,
+        serialize::Serializable,
+        types::{event::Event, stream::ScannedItem, teststatus::TestStatus},
+    };
+
+    #[tokio::test]
+    async fn test_iter_stream() {
+        // Construct a buffer containing a simple v2 stream
+
+        let events = vec![
+            Event::new(TestStatus::Success).test_id("foo").build(),
+            Event::new(TestStatus::Success).test_id("bar").build(),
+            Event::new(TestStatus::Success).test_id("baz").build(),
+        ];
+
+        let mut buf = Vec::new();
+        for event in events {
+            event.serialize(&mut buf).unwrap();
+        }
+
+        let stream = iter_stream(&buf[..]);
+        let results = stream
+            .collect::<Result<Vec<ScannedItem>, _>>()
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 3);
     }
 }
