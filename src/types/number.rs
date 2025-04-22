@@ -60,6 +60,7 @@ impl Debug for SubunitNumber {
 }
 
 impl SubunitNumber {
+    /// Creates a new `SubunitNumber` from a u32 value.
     pub fn new(value: u32) -> GenResult<Self> {
         if value > constants::MAX_NUMBER_VALUE {
             return Err(Error::TooLarge.into());
@@ -87,6 +88,7 @@ impl SubunitNumber {
         })
     }
 
+    /// Returns the number as a u32.
     pub fn as_u32(&self) -> u32 {
         match self {
             SubunitNumber::OneByte(value) => u32::from(value[0]),
@@ -107,6 +109,7 @@ impl SubunitNumber {
         }
     }
 
+    /// Returns the number as a byte slice.
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             SubunitNumber::OneByte(value) => value,

@@ -9,6 +9,7 @@ use crate::{
 /// Perhaps it will be hidden in future.
 #[derive(Debug)]
 pub struct UTF8VariableLength {
+    /// The bytes of the UTF8 variable length encoding. This may not be valid UTF8.
     pub bytes: Vec<u8>,
 }
 

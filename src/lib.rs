@@ -10,12 +10,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![deny(missing_docs)]
+
 //! Implementation of the Subunit protocol in Rust. For the protocol definition,
 //! see the [Subunit Protocol
 //! Specification](https://github.com/testing-cabal/subunit/blob/main/README.rst).
 //! This crate contains both a v1 and v2 implementation of the protocol. v1 is
 //! disabled by default but can be enabled via the `v1` feature.
 
+/// Types representing the Subunit protocol
 pub mod types {
     pub mod event;
     pub mod eventfeatures;
@@ -29,12 +32,25 @@ pub mod types {
 pub mod deserialize;
 pub mod io;
 pub mod serialize;
+
+/// Constants defined by the Subunit protocol
 pub mod constants {
+    /// The Subunit v2 protocol signature
     pub static V2_SIGNATURE: u8 = 0xb3;
+
+    /// Maximum packet length
     pub static MAX_PACKET_LENGTH: u32 = 4 * 1024 * 1024;
+
+    /// Maximum value for a number
     pub static MAX_NUMBER_VALUE: u32 = 0x3fffffff;
+
+    /// Mask for a number kind
     pub static NUMBER_KIND_MASK: u8 = 0xc0;
+
+    /// Mask for a number value
     pub static NUMBER_VALUE_MASK: u8 = 0x3f;
+
+    /// The Subunit v2 protocol version
     pub static VERSION2: u16 = 0x2000;
 }
 #[cfg(feature = "v1")]
@@ -45,6 +61,9 @@ use std::fmt::Debug;
 use thiserror::Error as ThisError;
 
 #[derive(ThisError)]
+// Allow missing docs, because #[error] will generate them
+#[allow(missing_docs)]
+/// Error type for parsing and serializing Subunit packets
 pub enum Error {
     #[error("Value is too large to encode")]
     TooLarge,
