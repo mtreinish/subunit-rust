@@ -1,13 +1,13 @@
 Subunit Rust
 ============
 [![subunit-rust on Travis CI][travis-image]][travis]
-[![subunit-rust on crates.io][cratesio-image]][cratesio]
+[![subunit on crates.io][cratesio-image]][cratesio]
 [![subunit-rust on Appveyor CI][appveyor-image]][appveyor]
 
 [travis-image]: https://travis-ci.org/mtreinish/subunit-rust.svg?branch=master
 [travis]: https://travis-ci.org/mtreinish/subunit-rust
-[cratesio-image]: https://img.shields.io/crates/v/subunit-rust.svg
-[cratesio]: https://crates.io/crates/subunit-rust
+[cratesio-image]: https://img.shields.io/crates/v/subunit.svg
+[cratesio]: https://crates.io/crates/subunit
 [appveyor-image]: https://img.shields.io/appveyor/ci/mtreinish/subunit-rust/master.svg
 [appveyor]: https://ci.appveyor.com/project/mtreinish/subunit-rust
 
