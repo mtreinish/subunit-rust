@@ -112,6 +112,7 @@ impl Serializable for String {
     }
 }
 
+/// A writer that computes a CRC32 checksum of the data written to it.
 pub struct Writer<'a, W> {
     buffer: &'a mut W,
     hasher: Hasher,

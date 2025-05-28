@@ -1,3 +1,4 @@
+//! Subunit event
 use std::io::Write;
 
 use chrono::{DateTime, Utc};
@@ -42,16 +43,19 @@ macro_rules! safe_de {
 pub struct EventBuilder(Event);
 
 impl EventBuilder {
+    /// Set the test id
     pub fn test_id(mut self, test_id: &str) -> Self {
         self.0.test_id = Some(test_id.to_string());
         self
     }
 
+    /// Set the event timestamp
     pub fn datetime(mut self, datetime: DateTime<Utc>) -> GenResult<Self> {
         self.0.timestamp = Some(datetime.try_into()?);
         Ok(self)
     }
 
+    /// Add a tag to the event
     pub fn tag(mut self, tag: &str) -> Self {
         if self.0.tags.is_none() {
             self.0.tags = Some(Vec::new());
@@ -60,31 +64,37 @@ impl EventBuilder {
         self
     }
 
+    /// Set the file mime type
     pub fn mime_type(mut self, mime_type: &str) -> Self {
         self.0.file.mime_type = Some(mime_type.to_string());
         self
     }
 
+    /// Set the file content
     pub fn file_content(mut self, name: &str, content: &[u8]) -> Self {
         self.0.file.file = Some((name.to_string(), content.to_vec()));
         self
     }
 
+    /// Set the event as end of file
     pub fn end_of_file(mut self) -> Self {
         self.0.file.eof = true;
         self
     }
 
+    /// Set the event as runnable
     pub fn runnable(mut self) -> Self {
         self.0.runnable = true;
         self
     }
 
+    /// Set the routing code
     pub fn route_code(mut self, route_code: &str) -> Self {
         self.0.route_code = Some(route_code.to_string());
         self
     }
 
+    /// Build the event
     pub fn build(self) -> Event {
         self.0
     }
