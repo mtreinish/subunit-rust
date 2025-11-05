@@ -37,7 +37,7 @@ the contents of the packet. For example:
     let mut event_start = Event {
         status: Some("inprogress".to_string()),
         test_id: Some("A_test_id".to_string()),
-        timestamp: Some(Utc.ymd(2014, 7, 8).and_hms(9, 10, 11)),
+        timestamp: Some(Utc.with_ymd_and_hms(2014, 7, 8, 9, 10, 11).unwrap()),
         tags: Some(vec!["tag_a".to_string(), "tag_b".to_string()]),
         file_content: None,
         file_name: None,
@@ -52,7 +52,7 @@ and the other to mark the finish of a test:
     let mut event_end = Event {
         status: Some("success".to_string()),
         test_id: Some("A_test_id".to_string()),
-        timestamp: Some(Utc.ymd(2014, 7, 8).and_hms(9, 12, 0)),
+        timestamp: Some(Utc.with_ymd_and_hms(2014, 7, 8, 9, 12, 0).unwrap()),
         tags: Some(vec!["tag_a".to_string(), "tag_b".to_string()]),
         file_content: Some("stdout content".to_string().into_bytes()),
         file_name: Some("stdout:''".to_string()),
