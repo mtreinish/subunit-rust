@@ -32,9 +32,9 @@ parsing a subunit stream from a file:
                 // Process the event
                 println!("Got event: {:?}", event);
             },
-            ScannedItem::UTF8chars(text) => {
-                // Process text
-                println!("Got text: {:?}", text);
+            ScannedItem::Bytes(bytes) => {
+                // Process non-event data
+                println!("Got bytes: {:?}", bytes);
             },
             ScannedItem::Unknown(bytes, err) => {
                 // Handle unknown data

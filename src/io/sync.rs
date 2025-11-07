@@ -56,10 +56,10 @@ where
                     if self.buffer.is_empty() {
                         return None;
                     }
-                    // By definition, we have a partial packet or partial codepoint
+                    // By definition, we have a partial packet or partial byte
                     return Some(Ok(ScannedItem::Unknown(
                         self.buffer.drain(..).collect(),
-                        Error::InvalidUTF8Sequence.into(),
+                        Error::NotEnoughBytes.into(),
                     )));
                 }
                 Ok(n) => {
@@ -72,14 +72,23 @@ where
 
         // Now we have enough data to do something with it.
         let buf = self.buffer.make_contiguous();
-
-        // TODO: scan rapidly and collect all UTF8 text in one go rather than depending on the optimiser to make it
-        // efficient.
         match ScannedItem::deserialize(buf) {
-            Ok((event, used)) => {
+            Ok((ScannedItem::Event(event), used)) => {
                 self.buffer.drain(..used);
-                Some(Ok(event))
+                Some(Ok(ScannedItem::Event(event)))
             }
+            Ok((ScannedItem::Bytes(_), _)) => {
+                // Collect all consecutive non-event bytes into a single item
+                let mut bytes = Vec::new();
+                while let Some(&byte) = self.buffer.front() {
+                    if byte == crate::constants::V2_SIGNATURE {
+                        break;
+                    }
+                    bytes.push(self.buffer.pop_front().unwrap());
+                }
+                Some(Ok(ScannedItem::Bytes(bytes)))
+            }
+            Ok((ScannedItem::Unknown(data, e), _)) => Some(Ok(ScannedItem::Unknown(data, e))),
             Err(e) => {
                 // We know from the loop above that we had enough bytes, and this is not IO: some form of junk.
                 // We have an invalid char or failed crc32 or similar.
@@ -171,5 +180,35 @@ mod tests {
         }
 
         assert_eq!(count, 1, "Expected 1 event, got {}", count);
+    }
+
+    #[test]
+    fn test_stream_with_invalid_utf8() {
+        // Test that we can parse a stream with invalid UTF-8 bytes interleaved
+        let event = Event::new(TestStatus::Success).test_id("test").build();
+
+        let mut buffer = Vec::new();
+        // Add some invalid UTF-8 bytes (0xFF is not valid UTF-8 start byte)
+        buffer.extend_from_slice(&[0xFF, 0xFE, 0xFD]);
+        // Add a valid event
+        event.serialize(&mut buffer).unwrap();
+        // Add more invalid UTF-8
+        buffer.extend_from_slice(&[0x80, 0x81]);
+
+        let items: Vec<_> = sync::iter_stream(Cursor::new(&buffer))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        // We should get: 1 Bytes item (with 3 bytes), 1 Event, 1 Bytes item (with 2 bytes)
+        assert_eq!(items.len(), 3);
+        match &items[0] {
+            ScannedItem::Bytes(bytes) => assert_eq!(bytes, &[0xFF, 0xFE, 0xFD]),
+            _ => panic!("Expected Bytes, got {:?}", items[0]),
+        }
+        assert!(matches!(items[1], ScannedItem::Event(_)));
+        match &items[2] {
+            ScannedItem::Bytes(bytes) => assert_eq!(bytes, &[0x80, 0x81]),
+            _ => panic!("Expected Bytes, got {:?}", items[2]),
+        }
     }
 }
