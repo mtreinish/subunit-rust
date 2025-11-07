@@ -1,9 +1,9 @@
 //! V1 protocol implementation.
 //!
-//! Note that only an async pull parser for v1 so far (the primary use is
-//! scaffolding to support upgrading to v2). For use in sync programs, use
-//! `tokio::runtime::Runtime::block_on`. A push parser would need to be
-//! developed if that is a requirement.
+//! This module provides both synchronous and asynchronous parsers for the
+//! Subunit v1 protocol. Use `parse_sync()` for synchronous parsing and
+//! `parse()` for asynchronous parsing. The primary use of v1 is scaffolding
+//! to support upgrading to v2.
 
 use core::fmt;
 use std::{fmt::Debug, mem};
@@ -21,6 +21,7 @@ use crate::{
 
 /// The default content details for simple bracketed details
 pub static TRACEBACK_NAME: &str = "traceback";
+/// The default MIME type for traceback content
 pub static X_TRACEBACK: &str = "text/x-traceback;charset=utf-8";
 
 /// An event from a Subunit v1 stream
@@ -63,6 +64,7 @@ pub enum Event {
     Tags(Vec<String>, Vec<String>),
     /// What is the time that the next event 'happens' at.
     Time(DateTime<Utc>),
+    /// Marks the end of the stream
     EndOfStream,
 }
 
@@ -71,7 +73,7 @@ impl Event {
     pub fn from_buffer(buf: &[u8]) -> Self {
         let buf = buf.to_vec();
         String::from_utf8(buf)
-            .map(|s| Event::Text(s))
+            .map(Event::Text)
             .unwrap_or_else(|e| Event::Bytes(e.into_bytes()))
     }
 
@@ -79,7 +81,7 @@ impl Event {
         if parts.is_empty() {
             writer.write_all(b"\n")
         } else {
-            write!(writer, " [ multipart\n")?;
+            writeln!(writer, " [ multipart")?;
             for part in parts {
                 <Part as WriteInto>::write_into(part, writer)?;
             }
@@ -125,7 +127,7 @@ where
 impl WriteInto for Event {
     fn write_into(&self, writer: &mut dyn std::io::Write) -> std::io::Result<()> {
         match self {
-            Event::TestStart(name) => write!(writer, "test: {name}\n"),
+            Event::TestStart(name) => writeln!(writer, "test: {name}"),
             Event::TestSuccess(name, parts) => {
                 write!(writer, "success: {name}")?;
                 Event::write_parts(writer, parts)
@@ -151,18 +153,18 @@ impl WriteInto for Event {
                 Event::write_parts(writer, parts)
             }
 
-            Event::ProgressPush => write!(writer, "progress: push\n"),
-            Event::ProgressPop => write!(writer, "progress: pop\n"),
-            Event::ProgressSet(v) => write!(writer, "progress: {v}\n"),
+            Event::ProgressPush => writeln!(writer, "progress: push"),
+            Event::ProgressPop => writeln!(writer, "progress: pop"),
+            Event::ProgressSet(v) => writeln!(writer, "progress: {v}"),
             Event::ProgressCurrent(v) => {
                 if *v >= 0 {
-                    write!(writer, "progress: +{v}\n")
+                    writeln!(writer, "progress: +{v}")
                 } else {
-                    write!(writer, "progress: {v}\n")
+                    writeln!(writer, "progress: {v}")
                 }
             }
-            Event::Text(t) => write!(writer, "{t}\n"),
-            Event::Bytes(b) => writer.write_all(&b),
+            Event::Text(t) => writeln!(writer, "{t}"),
+            Event::Bytes(b) => writer.write_all(b),
             Event::Tags(added, removed) => {
                 write!(writer, "tags: ")?;
                 let iter = TagsIter(
@@ -179,12 +181,12 @@ impl WriteInto for Event {
                         write!(writer, " ")?;
                     }
                 }
-                write!(writer, "\n")
+                writeln!(writer)
             }
             Event::Time(t) => {
-                write!(
+                writeln!(
                     writer,
-                    "time: {}\n",
+                    "time: {}",
                     t.naive_utc().format("%Y-%m-%d %H:%M:%SZ")
                 )
             }
@@ -248,7 +250,7 @@ impl WriteIntoAsync for Event {
                 writer.write_all(t.as_bytes()).await?;
                 writer.write_all(b"\n").await
             }
-            Event::Bytes(b) => writer.write_all(&b).await,
+            Event::Bytes(b) => writer.write_all(b).await,
             Event::Tags(added, removed) => {
                 writer.write_all("tags: ".as_bytes()).await?;
                 let last = added.len() + removed.len() - 1;
@@ -321,8 +323,8 @@ impl Debug for Part {
 
 impl WriteInto for Part {
     fn write_into(&self, writer: &mut dyn std::io::Write) -> std::io::Result<()> {
-        write!(writer, "Content-Type: {}\n", self.content_type)?;
-        write!(writer, "{}\n", self.name)?;
+        writeln!(writer, "Content-Type: {}", self.content_type)?;
+        writeln!(writer, "{}", self.name)?;
         if !self.bytes.is_empty() {
             write!(writer, "{}\r\n", self.bytes.len())?;
             writer.write_all(&self.bytes)?;
@@ -384,6 +386,11 @@ pub trait SubunitStream: AsyncBufRead + Unpin + fmt::Debug {}
 
 impl<T> SubunitStream for T where T: AsyncBufRead + Unpin + fmt::Debug {}
 
+/// Defines the traits needed for a synchronous parser stream.
+pub trait BufReadStream: std::io::BufRead + fmt::Debug {}
+
+impl<T> BufReadStream for T where T: std::io::BufRead + fmt::Debug {}
+
 mod parser {
     //! Wire -> tokens parser for the subunit v1 protocol.
 
@@ -393,13 +400,12 @@ mod parser {
     use winnow::{
         ascii::line_ending,
         combinator::{alt, cut_err, fail, preceded, repeat_till, terminated, trace},
-        error::{
-            ContextError, ErrMode, ErrorKind, FromExternalError, ParserError, StrContext,
-            StrContextValue,
-        },
+        error::{ContextError, ErrMode, FromExternalError, StrContext, StrContextValue},
         token::{take, take_till, take_until, take_while},
-        BStr, PResult, Parser, Partial, Stateful,
+        BStr, Parser, Partial, Stateful,
     };
+
+    type PResult<T> = Result<T, ErrMode<ContextError>>;
 
     use super::{Event, Part, TRACEBACK_NAME, X_TRACEBACK};
 
@@ -445,20 +451,19 @@ mod parser {
         input: &mut Stream<'s>,
         line: &'s [u8],
     ) -> PResult<(&'s str, Option<DetailStyle>)> {
-        let line = from_utf8(line)
-            .map_err(|e| ErrMode::from_external_error(input, ErrorKind::Verify, e))?;
+        let line = from_utf8(line).map_err(|e| ErrMode::from_external_error(input, e))?;
 
-        let (name, detail_style) = if line.ends_with(" [") {
-            let line = &line[..line.len() - 2]; // Safe from the ends_with check
+        let (name, detail_style) = if let Some(line) = line.strip_suffix(" [") {
+            // Safe from the ends_with check
             (line, Some(DetailStyle::Bracketed))
-        } else if line.ends_with(" [ multipart") {
-            let line = &line[..line.len() - 12]; // Safe from the ends_with check
+        } else if let Some(line) = line.strip_suffix(" [ multipart") {
+            // Safe from the ends_with check
             (line, Some(DetailStyle::MultiPart))
         } else {
             (line, None)
         };
         if name.is_empty() {
-            return Err(ErrMode::from_error_kind(input, ErrorKind::Fail));
+            return Err(ErrMode::Cut(ContextError::new()));
         }
 
         Ok((name, detail_style))
@@ -473,32 +478,33 @@ mod parser {
         .parse_next(input)?;
 
         let (label, detail_style) = parse_label_and_detail_style(input, line)?;
-        check_name_match(input, &label)?;
+        check_name_match(input, label)?;
         match detail_style {
-            Some(DetailStyle::Bracketed) => alt((
-                (&b"]"[..], line_ending).value((label, &[][..])),
-                (
-                    (take_until(0.., &b"\n]\n"[..]), line_ending).take(),
-                    b"]",
-                    line_ending,
-                )
-                    .map(|(y, _, _): (&[u8], _, _)| (label, y)),
-            ))
-            .context(StrContext::Label("test label"))
-            .context(StrContext::Expected(StrContextValue::Description(
-                "utf8 string",
-            )))
-            .map(|(name, details)| {
-                (
-                    name.to_string(),
-                    vec![Part::new(X_TRACEBACK, TRACEBACK_NAME, details)],
-                )
-            })
-            .parse_next(input),
+            Some(DetailStyle::Bracketed) => {
+                let label_str = label.to_string();
+                let parsed = alt((
+                    (&b"]"[..], line_ending).value(&[][..]),
+                    (
+                        (take_until(0.., &b"\n]\n"[..]), line_ending).take(),
+                        b"]",
+                        line_ending,
+                    )
+                        .map(|(y, _, _): (&[u8], _, _)| y),
+                ))
+                .context(StrContext::Label("test label"))
+                .context(StrContext::Expected(StrContextValue::Description(
+                    "utf8 string",
+                )))
+                .parse_next(input)?;
+                Ok((
+                    label_str,
+                    vec![Part::new(X_TRACEBACK, TRACEBACK_NAME, parsed)],
+                ))
+            }
             Some(DetailStyle::MultiPart) => repeat_till(0.., parse_part, &b"]\n"[..])
                 .map(|(parts, _acc): (Vec<Part>, _)| (label.to_string(), parts))
                 .parse_next(input),
-            None => return Ok((label.to_string(), vec![])),
+            None => Ok((label.to_string(), vec![])),
         }
     }
 
@@ -558,8 +564,8 @@ mod parser {
         let mut added = vec![];
         let mut removed = vec![];
         for tag in tags.split_whitespace() {
-            if tag.starts_with('-') {
-                removed.push(tag[1..].to_string());
+            if let Some(stripped) = tag.strip_prefix('-') {
+                removed.push(stripped.to_string());
             } else {
                 added.push(tag.to_string());
             }
@@ -662,7 +668,7 @@ mod parser {
     mod tests {
 
         use winnow::{
-            error::{ErrMode, ErrorKind, Needed, ParserError},
+            error::{ErrMode, Needed},
             BStr, Partial,
         };
 
@@ -731,7 +737,7 @@ mod parser {
             let mut input = stream(&input, &mut state);
             // parses as an error, which the line based iterator will catch
             let err = super::parse_label_details(&mut input).unwrap_err();
-            assert_eq!(ErrMode::from_error_kind(&input, ErrorKind::Fail).cut(), err);
+            assert!(matches!(err, ErrMode::Cut(_)));
         }
 
         #[test]
@@ -814,13 +820,13 @@ impl<'a> TestProtocolServer<'a> {
                 return self.generate_end_of_stream();
             }
 
-            let mut input = BStr::new(&buf);
+            let input = BStr::new(&buf);
 
             match &self.state {
                 ParseState::InTest(test_name) => {
                     let test_name = Some(test_name.as_str());
                     let mut input = parser::Stream {
-                        input: Partial::new(&mut input),
+                        input: Partial::new(input),
                         state: parser::State(&test_name),
                     };
                     let parsed = parser::parse_subunit_event_in_test.parse_next(&mut input);
@@ -860,7 +866,7 @@ impl<'a> TestProtocolServer<'a> {
                 ParseState::Global => {
                     let test_name = None;
                     let mut input = parser::Stream {
-                        input: Partial::new(&mut input),
+                        input: Partial::new(input),
                         state: parser::State(&test_name),
                     };
                     if let Ok(event) = parser::parse_subunit_event_global.parse_next(&mut input) {
@@ -891,7 +897,7 @@ impl<'a> TestProtocolServer<'a> {
                 vec![Part::new(X_TRACEBACK, TRACEBACK_NAME, message.as_bytes())],
             ));
         }
-        return Ok(Event::EndOfStream);
+        Ok(Event::EndOfStream)
     }
 
     /// Read from the stream.
@@ -909,7 +915,7 @@ impl<'a> TestProtocolServer<'a> {
 
     fn maybe_utf8(buf: Vec<u8>) -> Result<Event, crate::Error> {
         String::from_utf8(buf)
-            .map(|s| Event::Text(s))
+            .map(Event::Text)
             .or_else(|e| Ok(Event::Bytes(e.into_bytes())))
     }
 }
@@ -917,6 +923,144 @@ impl<'a> TestProtocolServer<'a> {
 impl std::fmt::Debug for TestProtocolServer<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TestProtocolServer").finish()
+    }
+}
+
+/// Construct a synchronous parser on a BufRead + Debug
+///
+/// Returns an iterator over Events, similar to the async version but synchronous.
+/// This allows v1 parsing in synchronous contexts without requiring tokio runtime.
+pub fn parse_sync(
+    reader: &mut dyn BufReadStream,
+) -> impl Iterator<Item = Result<Event, crate::Error>> + '_ {
+    TestProtocolServerSync {
+        reader,
+        state: ParseState::Global,
+    }
+}
+
+/// Synchronous version of the subunit v1 parser
+pub struct TestProtocolServerSync<'a> {
+    reader: &'a mut dyn BufReadStream,
+    state: ParseState,
+}
+
+impl<'a> TestProtocolServerSync<'a> {
+    fn next(&mut self) -> Result<Option<Event>, crate::Error> {
+        let mut buf = vec![];
+        // parse the command using winnow
+        loop {
+            use winnow::Partial;
+            use winnow::{error::ErrMode, BStr, Parser};
+
+            let len = self.reader.read_until(b'\n', &mut buf)?;
+            if buf.is_empty() {
+                return Ok(Some(self.generate_end_of_stream()));
+            }
+
+            let input = BStr::new(&buf);
+
+            match &self.state {
+                ParseState::InTest(test_name) => {
+                    let test_name = Some(test_name.as_str());
+                    let mut input = parser::Stream {
+                        input: Partial::new(input),
+                        state: parser::State(&test_name),
+                    };
+                    let parsed = parser::parse_subunit_event_in_test.parse_next(&mut input);
+                    match parsed {
+                        Err(ErrMode::Incomplete(_n)) => {
+                            if len == 0 {
+                                // end of stream when more data was needed
+                                return Ok(Some(self.generate_end_of_stream()));
+                            }
+                            continue;
+                        }
+                        Err(_e) => {
+                            // permanent error: provide the buffered lines as Text
+                            return Ok(Some(Event::from_buffer(&buf)));
+                        }
+
+                        Ok(event) => {
+                            match event {
+                                // end of test events
+                                Event::TestSuccess(_, _)
+                                | Event::TestFailure(_, _)
+                                | Event::TestError(_, _)
+                                | Event::TestSkip(_, _)
+                                | Event::TestExpectedFailure(_, _)
+                                | Event::TestUnexpectedSuccess(_, _) => {
+                                    self.state = ParseState::Global;
+                                    return Ok(Some(event));
+                                }
+
+                                _ => {
+                                    return Ok(Some(event));
+                                }
+                            }
+                        }
+                    }
+                }
+                ParseState::Global => {
+                    let test_name = None;
+                    let mut input = parser::Stream {
+                        input: Partial::new(input),
+                        state: parser::State(&test_name),
+                    };
+                    if let Ok(event) = parser::parse_subunit_event_global.parse_next(&mut input) {
+                        match &event {
+                            Event::TestStart(test_name) => {
+                                self.state = ParseState::InTest(test_name.clone());
+                                return Ok(Some(event));
+                            }
+
+                            _ => {
+                                return Ok(Some(event));
+                            }
+                        }
+                    }
+                }
+            }
+            // Not recognized as a subunit event in the current state
+            return Self::maybe_utf8(buf).map(Some);
+        }
+    }
+
+    fn generate_end_of_stream(&mut self) -> Event {
+        let old_state = mem::replace(&mut self.state, ParseState::Global);
+        if let ParseState::InTest(test_name) = old_state {
+            let message = format!("lost connection during test '{test_name}'");
+            return Event::TestError(
+                test_name,
+                vec![Part::new(X_TRACEBACK, TRACEBACK_NAME, message.as_bytes())],
+            );
+        }
+        Event::EndOfStream
+    }
+
+    fn maybe_utf8(buf: Vec<u8>) -> Result<Event, crate::Error> {
+        String::from_utf8(buf)
+            .map(Event::Text)
+            .or_else(|e| Ok(Event::Bytes(e.into_bytes())))
+    }
+}
+
+impl std::fmt::Debug for TestProtocolServerSync<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TestProtocolServerSync").finish()
+    }
+}
+
+impl<'a> Iterator for TestProtocolServerSync<'a> {
+    type Item = Result<Event, crate::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.next() {
+            Ok(Some(Event::EndOfStream)) => None,
+            Ok(Some(event)) => Some(Ok(event)),
+            Ok(None) => None,
+            Err(e) => Some(Err(e)),
+        }
     }
 }
 
@@ -1336,6 +1480,296 @@ mod tests {
             ],
             &events[..]
         );
+    }
+
+    fn parse_stream_sync(stream: &[u8]) -> Vec<super::Event> {
+        let mut stream = std::io::Cursor::new(stream);
+        let stream: &mut dyn super::BufReadStream = &mut stream;
+        let parser = super::parse_sync(stream);
+        let events = parser.collect::<Result<Vec<_>, crate::Error>>().unwrap();
+        events
+    }
+
+    #[test]
+    fn test_story_sync() {
+        let stream = &b"test old mcdonald\nsuccess old mcdonald\n"[..];
+        let events = parse_stream_sync(stream);
+        assert_eq!(
+            &[
+                Event::TestStart("old mcdonald".into()),
+                Event::TestSuccess("old mcdonald".into(), vec![])
+            ],
+            &events[..]
+        );
+    }
+
+    #[test]
+    fn test_command_in_wrong_state_sync() {
+        let stream = &b"success old mcdonald\n"[..];
+        let events = parse_stream_sync(stream);
+        assert_eq!(&[Event::Text("success old mcdonald\n".into())], &events[..]);
+    }
+
+    #[test]
+    fn test_story_two_sync() {
+        let err_msg = "foo.c:53:ERROR invalid state\n";
+        let stream = [
+            &b"test old mcdonald\n"[..],
+            b"success old mcdonald\n",
+            b"test bing crosby\n",
+            b"failure bing crosby [\n",
+            err_msg.as_bytes(),
+            b"]\n",
+            b"test an error\n",
+            b"error an error\n",
+        ];
+
+        let events = parse_stream_sync(&stream.join(&[][..])[..]);
+        assert_eq!(
+            &[
+                Event::TestStart("old mcdonald".into()),
+                Event::TestSuccess("old mcdonald".into(), vec![]),
+                Event::TestStart("bing crosby".into()),
+                Event::TestFailure(
+                    "bing crosby".into(),
+                    vec![Part::new(X_TRACEBACK, TRACEBACK_NAME, err_msg.as_bytes())]
+                ),
+                Event::TestStart("an error".into()),
+                Event::TestError("an error".into(), vec![])
+            ],
+            &events[..]
+        );
+    }
+
+    #[test]
+    fn test_start_test_variants_sync() {
+        for cmd in &["test", "test:", "testing", "testing:"] {
+            let stream = format!("{cmd} old mcdonald\nsuccess old mcdonald\n");
+            let stream = stream.as_bytes();
+            let events = parse_stream_sync(&stream);
+            assert_eq!(
+                &[
+                    Event::TestStart("old mcdonald".into()),
+                    Event::TestSuccess("old mcdonald".into(), vec![])
+                ],
+                &events[..]
+            );
+        }
+    }
+
+    #[test]
+    fn test_progress_events_sync() {
+        let stream = [
+            &b"progress: push\n"[..],
+            &b"progress: 23\n"[..],
+            &b"progress: -2\n"[..],
+            &b"progress: pop\n"[..],
+            &b"progress: +4\n"[..],
+        ];
+
+        let events = parse_stream_sync(&stream.join(&[][..])[..]);
+        assert_eq!(
+            &[
+                Event::ProgressPush,
+                Event::ProgressSet(23),
+                Event::ProgressCurrent(-2),
+                Event::ProgressPop,
+                Event::ProgressCurrent(4),
+            ],
+            &events[..]
+        );
+    }
+
+    #[test]
+    fn test_tag_events_sync() {
+        let stream = [
+            &b"tags: foo bar:baz  quux\n"[..],
+            &b"tags: foo -bar:baz  quux\n"[..],
+            &b"test old mcdonald\n"[..],
+            &b"tags: foo -bar:baz\n"[..],
+            &b"success old mcdonald\n"[..],
+        ];
+
+        let events = parse_stream_sync(&stream.join(&[][..])[..]);
+        assert_eq!(
+            &[
+                Event::Tags(vec!["foo".into(), "bar:baz".into(), "quux".into()], vec![]),
+                Event::Tags(vec!["foo".into(), "quux".into()], vec!["bar:baz".into()]),
+                Event::TestStart("old mcdonald".into()),
+                Event::Tags(vec!["foo".into()], vec!["bar:baz".into()]),
+                Event::TestSuccess("old mcdonald".into(), vec![])
+            ],
+            &events[..]
+        );
+    }
+
+    #[test]
+    fn test_time_events_sync() {
+        let stream = [
+            // set it globally
+            &b"time: 2001-12-12 12:59:59Z\n"[..],
+            &b"test old mcdonald\n"[..],
+            // and of course, how long did the test take requires setting it before an outcome
+            &b"time: 2001-12-13 12:59:59Z\n"[..],
+            &b"success old mcdonald\n"[..],
+        ];
+
+        let events = parse_stream_sync(&stream.join(&[][..])[..]);
+        assert_eq!(
+            &[
+                Event::Time(
+                    NaiveDate::from_ymd_opt(2001, 12, 12)
+                        .unwrap()
+                        .and_hms_opt(12, 59, 59)
+                        .unwrap()
+                        .and_utc()
+                ),
+                Event::TestStart("old mcdonald".into()),
+                Event::Time(
+                    NaiveDate::from_ymd_opt(2001, 12, 13)
+                        .unwrap()
+                        .and_hms_opt(12, 59, 59)
+                        .unwrap()
+                        .and_utc()
+                ),
+                Event::TestSuccess("old mcdonald".into(), vec![])
+            ],
+            &events[..]
+        );
+    }
+
+    #[test]
+    fn test_empty_stream_sync() {
+        let stream = &b""[..];
+        let events = parse_stream_sync(&stream);
+        assert_eq!(&[] as &[Event], &events[..]);
+    }
+
+    #[test]
+    fn test_end_stream_in_test_sync() {
+        let stream = [&b"test old mcdonald\n"[..]];
+
+        let events = parse_stream_sync(&stream.join(&[][..])[..]);
+        assert_eq!(
+            &[
+                Event::TestStart("old mcdonald".into()),
+                Event::TestError(
+                    "old mcdonald".into(),
+                    vec![Part::new(
+                        X_TRACEBACK,
+                        TRACEBACK_NAME,
+                        "lost connection during test 'old mcdonald'".as_bytes()
+                    )]
+                ),
+            ],
+            &events[..]
+        );
+    }
+
+    #[test]
+    fn test_invalid_lines_passthrough_sync() {
+        let stream = &b"randombytes\n"[..];
+        let events = parse_stream_sync(&stream);
+        assert_eq!(&[Event::Text("randombytes\n".into()),], &events[..]);
+    }
+
+    #[test]
+    fn test_end_stream_after_test_sync() {
+        for variant in ["error", "failure", "success", "skip", "xfail", "uxsuccess"] {
+            let input = &format!("{variant} old mcdonald\n");
+            let stream = [&b"test old mcdonald\n"[..], input.as_bytes()];
+
+            let events = parse_stream_sync(&stream.join(&[][..])[..]);
+            assert_eq!(
+                &[
+                    Event::TestStart("old mcdonald".into()),
+                    variant_event(variant, "old mcdonald", &[]),
+                ],
+                &events[..]
+            );
+        }
+    }
+
+    #[test]
+    fn test_empty_bracket_content_sync() {
+        for variant in ["error", "failure", "success", "skip", "xfail", "uxsuccess"] {
+            let input = &format!("{variant} old mcdonald [\n]\n");
+            let stream = [&b"test old mcdonald\n"[..], input.as_bytes()];
+
+            let events = parse_stream_sync(&stream.join(&[][..])[..]);
+            assert_eq!(
+                &[
+                    Event::TestStart("old mcdonald".into()),
+                    variant_event(
+                        variant,
+                        "old mcdonald",
+                        &[Part::new(X_TRACEBACK, TRACEBACK_NAME, "".as_bytes())]
+                    ),
+                ],
+                &events[..]
+            );
+        }
+    }
+
+    #[test]
+    fn test_end_stream_in_brackets_sync() {
+        for outcome in ["error", "failure", "success", "skip", "xfail", "uxsuccess"] {
+            for outcome_details in ["[", "[ multipart"] {
+                let input = &format!("{} old mcdonald {}\n", outcome, outcome_details);
+                let stream = [&b"test old mcdonald\n"[..], input.as_bytes()];
+
+                let events = parse_stream_sync(&stream.join(&[][..])[..]);
+                assert_eq!(
+                    &[
+                        Event::TestStart("old mcdonald".into()),
+                        Event::TestError(
+                            "old mcdonald".into(),
+                            vec![Part::new(
+                                X_TRACEBACK,
+                                TRACEBACK_NAME,
+                                "lost connection during test 'old mcdonald'".as_bytes(),
+                            )]
+                        ),
+                    ],
+                    &events[..]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn round_trip_sync() {
+        let stream = [
+            &b"time: 2001-12-12 12:59:59Z\n"[..],
+            &b"tags: foo bar:baz -quux\n"[..],
+            &b"test: old mcdonald\n"[..],
+            &b"success: old mcdonald\n"[..],
+            &b"progress: push\n"[..],
+            &b"progress: 23\n"[..],
+            &b"progress: -2\n"[..],
+            &b"progress: pop\n"[..],
+            &b"test: old mcdonald\n"[..],
+            &b"success: old mcdonald [ multipart\n"[..],
+            &b"Content-Type: type/sub-type;p=v\n"[..],
+            &b"example1\n"[..],
+            &b"4\r\n12340\r\n"[..],
+            &b"]\n"[..],
+            &b"test: old mcdonald\n"[..],
+            &b"success: old mcdonald [ multipart\n"[..],
+            &b"Content-Type: simple/text\n"[..],
+            &b"example1\n"[..],
+            &b"0\r\n"[..],
+            &b"]\n"[..],
+        ];
+        let input = stream.join(&[][..]);
+        let events = parse_stream_sync(&input);
+
+        // sync write
+        let mut output = vec![];
+        for event in &events {
+            <Event as WriteInto>::write_into(&event, &mut output).unwrap();
+        }
+        assert_eq!(BStr::new(&input), BStr::new(&output));
     }
 
     #[tokio::test]
