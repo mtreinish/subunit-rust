@@ -31,26 +31,33 @@ where
     type Item = GenResult<ScannedItem>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let buf = self.buffer.make_contiguous();
-        let mut required_bytes = match ScannedItem::required_bytes(buf) {
-            Ok(v) => v,
-            Err(e) => return Some(Err(e)),
+        let mut required_bytes = {
+            let buf = self.buffer.make_contiguous();
+            match ScannedItem::required_bytes(buf) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            }
         };
-        while buf.len() < required_bytes {
-            match self.reader.read(buf) {
+        while self.buffer.len() < required_bytes {
+            let mut read_buffer = [0u8; 8192];
+            match self.reader.read(&mut read_buffer) {
                 Ok(0) => {
-                    if buf.is_empty() {
+                    if self.buffer.is_empty() {
                         return None;
                     }
-                    // By definition, we have a partial packet or partial codepoint
+                    // By definition, we have a partial packet or partial byte
                     return Some(Ok(ScannedItem::Unknown(
                         self.buffer.drain(..).collect(),
-                        Error::InvalidUTF8Sequence.into(),
+                        Error::NotEnoughBytes.into(),
                     )));
                 }
-                Ok(_) => (), // Might not be enough read yet
+                Ok(bytes_read) => {
+                    // Might not be enough read yet
+                    self.buffer.extend(read_buffer[..bytes_read].iter());
+                }
                 Err(e) => return Some(Err(e.into())),
             }
+            let buf = self.buffer.make_contiguous();
             required_bytes = match ScannedItem::required_bytes(buf) {
                 Ok(v) => v,
                 Err(e) => return Some(Err(e)),
@@ -59,13 +66,24 @@ where
 
         // Now we have enough data to do something with it.
 
-        // TODO: scan rapidly and collect all UTF8 text in one go rather than depending on the optimiser to make it
-        // efficient.
+        let buf = self.buffer.make_contiguous();
         match ScannedItem::deserialize(buf) {
-            Ok((event, used)) => {
+            Ok((ScannedItem::Event(event), used)) => {
                 self.buffer.drain(..used);
-                Some(Ok(event))
+                Some(Ok(ScannedItem::Event(event)))
             }
+            Ok((ScannedItem::Bytes(_), _)) => {
+                // Collect all consecutive non-event bytes into a single item
+                let mut bytes = Vec::new();
+                while let Some(&byte) = self.buffer.front() {
+                    if byte == crate::constants::V2_SIGNATURE {
+                        break;
+                    }
+                    bytes.push(self.buffer.pop_front().unwrap());
+                }
+                Some(Ok(ScannedItem::Bytes(bytes)))
+            }
+            Ok((ScannedItem::Unknown(data, e), _)) => Some(Ok(ScannedItem::Unknown(data, e))),
             Err(e) => {
                 // We know from the loop above that we had enough bytes, and this is not IO: some form of junk.
                 // We have an invalid char or failed crc32 or similar.
@@ -120,6 +138,36 @@ mod tests {
                 panic!("Expected event, got {:?}", parsed_event);
             };
             assert_eq!(*event, parsed_event);
+        }
+    }
+
+    #[test]
+    fn test_stream_with_invalid_utf8() {
+        // Test that we can parse a stream with invalid UTF-8 bytes interleaved
+        let event = Event::new(TestStatus::Success).test_id("test").build();
+
+        let mut buffer = Vec::new();
+        // Add some invalid UTF-8 bytes (0xFF is not valid UTF-8 start byte)
+        buffer.extend_from_slice(&[0xFF, 0xFE, 0xFD]);
+        // Add a valid event
+        event.serialize(&mut buffer).unwrap();
+        // Add more invalid UTF-8
+        buffer.extend_from_slice(&[0x80, 0x81]);
+
+        let items: Vec<_> = sync::iter_stream(Cursor::new(&buffer))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        // We should get: 1 Bytes item (with 3 bytes), 1 Event, 1 Bytes item (with 2 bytes)
+        assert_eq!(items.len(), 3);
+        match &items[0] {
+            ScannedItem::Bytes(bytes) => assert_eq!(bytes, &[0xFF, 0xFE, 0xFD]),
+            _ => panic!("Expected Bytes, got {:?}", items[0]),
+        }
+        assert!(matches!(items[1], ScannedItem::Event(_)));
+        match &items[2] {
+            ScannedItem::Bytes(bytes) => assert_eq!(bytes, &[0x80, 0x81]),
+            _ => panic!("Expected Bytes, got {:?}", items[2]),
         }
     }
 }
