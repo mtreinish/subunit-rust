@@ -203,15 +203,15 @@ impl Serializable for Event {
     fn wire_size(&self) -> GenResult<SubunitNumber> {
         //  PACKET = SIGNATURE FLAGS PACKET_LENGTH TIMESTAMP? TESTID? TAGS?
         //           MIME? FILECONTENT? ROUTING_CODE? CRC32
-        let base_length = (dbg!(V2_SIGNATURE.wire_size()?.as_u32())
-            + dbg!(2) // flags u16
+        let base_length = (V2_SIGNATURE.wire_size()?.as_u32()
+            + 2 // flags u16
             // + SubunitNumber(...).wire_size() // packet length- see below
-            + dbg!(self.timestamp.wire_size()?) // timestamp
-            + dbg!(self.test_id.wire_size()? )// test_id
-            + dbg!(self.tags.wire_size()? )// tags
-            + dbg!(self.file.wire_size()?) // file content
-            + dbg!(self.route_code.wire_size()?) // route code 
-            + dbg!(SubunitNumber::new(4_u32)?))?; // crc32
+            + self.timestamp.wire_size()? // timestamp
+            + self.test_id.wire_size()? // test_id
+            + self.tags.wire_size()? // tags
+            + self.file.wire_size()? // file content
+            + self.route_code.wire_size()? // route code
+            + SubunitNumber::new(4_u32)?)?; // crc32
 
         Self::packet_length(base_length.as_u32())
     }
