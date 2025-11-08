@@ -379,7 +379,7 @@ impl<'a> Reader<'a> {
         T: Deserializable,
     {
         let required = T::required_bytes(&self.bytes[self.bytes_read..])?;
-        if required > self.bytes.len() {
+        if required > self.bytes.len() - self.bytes_read {
             return Ok(Err(required + self.bytes_read));
         }
         let val = T::deserialize(&self.bytes[self.bytes_read..])?;

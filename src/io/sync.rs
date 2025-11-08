@@ -52,11 +52,26 @@ where
             // Use the reusable read buffer to avoid allocations
             match self.reader.read(&mut self.read_buf[..]) {
                 Ok(0) => {
-                    // EOF reached
+                    // EOF reached - check one more time if we have enough bytes
+                    // before declaring this Unknown. This handles the case where
+                    // required_bytes returns a conservative estimate that gets
+                    // refined as more data becomes available.
                     if self.buffer.is_empty() {
                         return None;
                     }
-                    // By definition, we have a partial packet or partial byte
+
+                    let buf = self.buffer.make_contiguous();
+                    let required_bytes = match ScannedItem::required_bytes(buf) {
+                        Ok(v) => v,
+                        Err(e) => return Some(Err(e)),
+                    };
+
+                    if buf.len() >= required_bytes {
+                        // We actually do have enough data
+                        break;
+                    }
+
+                    // Truly incomplete packet at EOF
                     return Some(Ok(ScannedItem::Unknown(
                         self.buffer.drain(..).collect(),
                         Error::NotEnoughBytes.into(),
@@ -210,5 +225,38 @@ mod tests {
             ScannedItem::Bytes(bytes) => assert_eq!(bytes, &[0x80, 0x81]),
             _ => panic!("Expected Bytes, got {:?}", items[2]),
         }
+    }
+
+    #[test]
+    fn test_many_events() {
+        // Test that we can parse a large number of events without losing any
+        const NUM_EVENTS: usize = 3461;
+
+        let mut buffer = Vec::new();
+        for i in 0..NUM_EVENTS {
+            let event = Event::new(TestStatus::Success)
+                .test_id(&format!("test_{}", i))
+                .build();
+            event.serialize(&mut buffer).unwrap();
+        }
+
+        let mut count = 0;
+        for item in sync::iter_stream(Cursor::new(&buffer)) {
+            match item {
+                Ok(ScannedItem::Event(_)) => count += 1,
+                Ok(ScannedItem::Unknown(data, e)) => {
+                    panic!(
+                        "Unexpected Unknown item at event {}: {} bytes, error: {:?}",
+                        count,
+                        data.len(),
+                        e
+                    );
+                }
+                Ok(ScannedItem::Bytes(_)) => {}
+                Err(e) => panic!("Error reading event: {:?}", e),
+            }
+        }
+
+        assert_eq!(count, NUM_EVENTS);
     }
 }
