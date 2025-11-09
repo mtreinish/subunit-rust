@@ -103,7 +103,10 @@ where
                 }
                 Some(Ok(ScannedItem::Bytes(bytes)))
             }
-            Ok((ScannedItem::Unknown(data, e), _)) => Some(Ok(ScannedItem::Unknown(data, e))),
+            Ok((ScannedItem::Unknown(data, e), used)) => {
+                self.buffer.drain(..used);
+                Some(Ok(ScannedItem::Unknown(data, e)))
+            }
             Err(e) => {
                 // We know from the loop above that we had enough bytes, and this is not IO: some form of junk.
                 // We have an invalid char or failed crc32 or similar.
@@ -258,5 +261,26 @@ mod tests {
         }
 
         assert_eq!(count, NUM_EVENTS);
+    }
+
+    #[test]
+    fn test_no_infinite_loop_on_malformed_stream() {
+        // This test reproduces the infinite loop bug from TODO.infinite-bug.md
+        // Raw subunit v2 packet from a simple test command
+        let data: &[u8] =
+            b"\xb3\x29\x00\x16test1\x20\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xb3";
+
+        let mut count = 0;
+        for item in sync::iter_stream(Cursor::new(data)) {
+            count += 1;
+            if count > 100 {
+                panic!("Infinite loop detected after {} iterations!", count);
+            }
+            // Just consume the item
+            let _ = item;
+        }
+
+        // Should finish in a reasonable number of iterations (likely 1-3)
+        assert!(count <= 10, "Expected few iterations, got {}", count);
     }
 }
