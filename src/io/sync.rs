@@ -82,7 +82,7 @@ where
 mod tests {
     use std::io::Cursor;
 
-    use chrono::{TimeZone, Utc};
+    use chrono::NaiveDate;
 
     use crate::{
         io::sync,
@@ -94,7 +94,13 @@ mod tests {
     fn test_write_full_test_event_with_file_content() {
         let event = Event::new(TestStatus::InProgress)
             .test_id("A_test_id")
-            .datetime(Utc.with_ymd_and_hms(2014, 7, 8, 9, 10, 11).unwrap())
+            .datetime(
+                NaiveDate::from_ymd_opt(2014, 7, 8)
+                    .unwrap()
+                    .and_hms_opt(9, 10, 11)
+                    .unwrap()
+                    .and_utc(),
+            )
             .unwrap()
             .tag("tag_a")
             .tag("tag_b")
@@ -103,7 +109,13 @@ mod tests {
             .build();
         let event_a = Event::new(TestStatus::Failed)
             .test_id("A_test_id")
-            .datetime(Utc.with_ymd_and_hms(2014, 7, 8, 9, 12, 1).unwrap())
+            .datetime(
+                NaiveDate::from_ymd_opt(2014, 7, 8)
+                    .unwrap()
+                    .and_hms_opt(9, 12, 1)
+                    .unwrap()
+                    .and_utc(),
+            )
             .unwrap()
             .tag("tag_a")
             .tag("tag_b")

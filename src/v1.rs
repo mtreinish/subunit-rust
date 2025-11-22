@@ -182,11 +182,7 @@ impl WriteInto for Event {
                 write!(writer, "\n")
             }
             Event::Time(t) => {
-                write!(
-                    writer,
-                    "time: {}\n",
-                    t.naive_utc().format("%Y-%m-%d %H:%M:%SZ")
-                )
+                write!(writer, "time: {}\n", t.format("%Y-%m-%d %H:%M:%SZ"))
             }
             Event::EndOfStream => Ok(()),
         }
@@ -273,12 +269,7 @@ impl WriteIntoAsync for Event {
             Event::Time(t) => {
                 writer.write_all("time: ".as_bytes()).await?;
                 writer
-                    .write_all(
-                        t.naive_utc()
-                            .format("%Y-%m-%d %H:%M:%SZ")
-                            .to_string()
-                            .as_bytes(),
-                    )
+                    .write_all(t.format("%Y-%m-%d %H:%M:%SZ").to_string().as_bytes())
                     .await?;
                 writer.write_all(b"\n").await
             }
