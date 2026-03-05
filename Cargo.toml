@@ -8,7 +8,7 @@ license = "Apache-2.0"
 name = "subunit"
 readme = "README.md"
 repository = "https://github.com/mtreinish/subunit-rust"
-version = "0.2.0"
+version = "0.3.0"
 
 [features]
 async = ["dep:async-stream", "dep:async-trait", "dep:tokio", "dep:tokio-stream"]
