@@ -5,62 +5,15 @@ use crate::{
     GenResult,
 };
 
-/// Newtype to hold the implementation of a UTF8 variable length encoding. Not 'char' because surrogates are included.
-/// Perhaps it will be hidden in future.
-#[derive(Debug)]
-pub struct UTF8VariableLength {
-    /// The bytes of the UTF8 variable length encoding. This may not be valid UTF8.
-    pub bytes: Vec<u8>,
-}
-
-impl Deserializable for UTF8VariableLength {
-    fn required_bytes(bytes: &[u8]) -> GenResult<usize> {
-        if bytes.is_empty() {
-            return Ok(1);
-        }
-        // Single octet codepoint
-        if bytes[0] & 0b10000000 == 0 {
-            return Ok(1);
-        }
-        // Continuation byte at start of sequence
-        if bytes[0] & 0b01000000 == 0 {
-            return Err(Error::InvalidUTF8Sequence.into());
-        }
-        // Two octet codepoint
-        if bytes[0] & 0b00100000 == 0 {
-            return Ok(2);
-        }
-        // Three octet codepoint
-        if bytes[0] & 0b00010000 == 0 {
-            return Ok(3);
-        }
-        // Four octet codepoint
-        if bytes[0] & 0b00001000 == 0 {
-            return Ok(4);
-        }
-        // 5 leading 1's? What is 5 leading 1's?
-        Err(Error::InvalidUTF8Sequence.into())
-    }
-
-    fn deserialize(bytes: &[u8]) -> GenResult<(Self, usize)> {
-        let length = Self::required_bytes(bytes)?;
-        Ok((
-            UTF8VariableLength {
-                bytes: bytes[..length].to_vec(),
-            },
-            length,
-        ))
-    }
-}
-
 /// Items in a subunit stream
 #[derive(Debug)]
 pub enum ScannedItem {
-    /// Non-event data following the UTF8 variable length encoding. May not actually be valid UTF8.
-    UTF8chars(UTF8VariableLength),
+    /// Non-event data - raw bytes that are not part of a subunit event.
+    /// This data is interleaved with the subunit stream (e.g., stdout/stderr).
+    Bytes(Vec<u8>),
     /// A subunit event
     Event(Event),
-    /// Bytes that that are neither UTF8 variable-length encoded nor a valid
+    /// Bytes that that are neither valid non-event data nor a valid
     /// Subunit packet. Could be: interrupted bytes of either at the end of a
     /// stream, striped and corrupted data, or a Subunit packet with a bad checksum
     Unknown(Vec<u8>, GenError),
@@ -68,7 +21,9 @@ pub enum ScannedItem {
 
 impl Deserializable for ScannedItem {
     fn required_bytes(bytes: &[u8]) -> GenResult<usize> {
-        Event::required_bytes(bytes).or_else(|_| UTF8VariableLength::required_bytes(bytes))
+        // If it's an event, return the event's required bytes
+        // Otherwise, just consume 1 byte at a time for non-event data
+        Event::required_bytes(bytes).or(Ok(1))
     }
 
     fn deserialize(bytes: &[u8]) -> GenResult<(Self, usize)> {
@@ -90,16 +45,8 @@ impl Deserializable for ScannedItem {
                 }
             }
         } else {
-            match UTF8VariableLength::required_bytes(bytes) {
-                Ok(required) => {
-                    let (utf8, used) = UTF8VariableLength::deserialize(&bytes[..required])?;
-                    Ok((ScannedItem::UTF8chars(utf8), used))
-                }
-                Err(e) => {
-                    // How much is corrupt / unknowable isn't known, so take one byte
-                    Ok((ScannedItem::Unknown(bytes[..1].to_vec(), e), 1))
-                }
-            }
+            // Non-event data - just forward the byte as-is
+            Ok((ScannedItem::Bytes(vec![bytes[0]]), 1))
         }
     }
 }
