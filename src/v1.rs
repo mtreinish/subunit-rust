@@ -14,10 +14,9 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt as _, AsyncWriteExt};
 use tokio_stream::Stream;
 use winnow::BStr;
 
-use crate::{
-    io::{r#async::WriteIntoAsync, sync::WriteInto},
-    Error,
-};
+#[cfg(feature = "sync")]
+use crate::io::sync::WriteInto;
+use crate::{io::r#async::WriteIntoAsync, Error};
 
 /// The default content details for simple bracketed details
 pub static TRACEBACK_NAME: &str = "traceback";
@@ -77,6 +76,7 @@ impl Event {
             .unwrap_or_else(|e| Event::Bytes(e.into_bytes()))
     }
 
+    #[cfg(feature = "sync")]
     fn write_parts(writer: &mut dyn std::io::Write, parts: &Vec<Part>) -> std::io::Result<()> {
         if parts.is_empty() {
             writer.write_all(b"\n")
@@ -109,10 +109,12 @@ impl Event {
     }
 }
 
+#[cfg(feature = "sync")]
 struct TagsIter<'s, I>(std::iter::Peekable<I>)
 where
     I: Iterator<Item = (&'s str, &'s str)> + Send;
 
+#[cfg(feature = "sync")]
 impl<'s, I> Iterator for TagsIter<'s, I>
 where
     I: Iterator<Item = (&'s str, &'s str)> + Send,
@@ -124,6 +126,7 @@ where
     }
 }
 
+#[cfg(feature = "sync")]
 impl WriteInto for Event {
     fn write_into(&self, writer: &mut dyn std::io::Write) -> std::io::Result<()> {
         match self {
@@ -316,6 +319,7 @@ impl Debug for Part {
     }
 }
 
+#[cfg(feature = "sync")]
 impl WriteInto for Part {
     fn write_into(&self, writer: &mut dyn std::io::Write) -> std::io::Result<()> {
         writeln!(writer, "Content-Type: {}", self.content_type)?;
@@ -381,9 +385,11 @@ pub trait SubunitStream: AsyncBufRead + Unpin + fmt::Debug {}
 
 impl<T> SubunitStream for T where T: AsyncBufRead + Unpin + fmt::Debug {}
 
+#[cfg(feature = "sync")]
 /// Defines the traits needed for a synchronous parser stream.
 pub trait BufReadStream: std::io::BufRead + fmt::Debug {}
 
+#[cfg(feature = "sync")]
 impl<T> BufReadStream for T where T: std::io::BufRead + fmt::Debug {}
 
 mod parser {
@@ -921,6 +927,7 @@ impl std::fmt::Debug for TestProtocolServer<'_> {
     }
 }
 
+#[cfg(feature = "sync")]
 /// Construct a synchronous parser on a BufRead + Debug
 ///
 /// Returns an iterator over Events, similar to the async version but synchronous.
@@ -934,12 +941,14 @@ pub fn parse_sync(
     }
 }
 
+#[cfg(feature = "sync")]
 /// Synchronous version of the subunit v1 parser
 pub struct TestProtocolServerSync<'a> {
     reader: &'a mut dyn BufReadStream,
     state: ParseState,
 }
 
+#[cfg(feature = "sync")]
 impl<'a> TestProtocolServerSync<'a> {
     fn next(&mut self) -> Result<Option<Event>, crate::Error> {
         let mut buf = vec![];
@@ -1040,12 +1049,14 @@ impl<'a> TestProtocolServerSync<'a> {
     }
 }
 
+#[cfg(feature = "sync")]
 impl std::fmt::Debug for TestProtocolServerSync<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TestProtocolServerSync").finish()
     }
 }
 
+#[cfg(feature = "sync")]
 impl<'a> Iterator for TestProtocolServerSync<'a> {
     type Item = Result<Event, crate::Error>;
 
@@ -1067,8 +1078,10 @@ mod tests {
     use tokio_stream::StreamExt;
     use winnow::BStr;
 
+    #[cfg(feature = "sync")]
+    use crate::io::sync::WriteInto;
     use crate::{
-        io::{r#async::WriteIntoAsync, sync::WriteInto},
+        io::r#async::WriteIntoAsync,
         v1::{Event, Part, TRACEBACK_NAME, X_TRACEBACK},
     };
 
@@ -1477,6 +1490,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "sync")]
     fn parse_stream_sync(stream: &[u8]) -> Vec<super::Event> {
         let mut stream = std::io::Cursor::new(stream);
         let stream: &mut dyn super::BufReadStream = &mut stream;
@@ -1485,6 +1499,7 @@ mod tests {
         events
     }
 
+    #[cfg(feature = "sync")]
     #[test]
     fn test_story_sync() {
         let stream = &b"test old mcdonald\nsuccess old mcdonald\n"[..];
@@ -1498,6 +1513,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "sync")]
     #[test]
     fn test_command_in_wrong_state_sync() {
         let stream = &b"success old mcdonald\n"[..];
@@ -1505,6 +1521,7 @@ mod tests {
         assert_eq!(&[Event::Text("success old mcdonald\n".into())], &events[..]);
     }
 
+    #[cfg(feature = "sync")]
     #[test]
     fn test_story_two_sync() {
         let err_msg = "foo.c:53:ERROR invalid state\n";
@@ -1536,6 +1553,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "sync")]
     #[test]
     fn test_start_test_variants_sync() {
         for cmd in &["test", "test:", "testing", "testing:"] {
@@ -1552,6 +1570,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "sync")]
     #[test]
     fn test_progress_events_sync() {
         let stream = [
@@ -1575,6 +1594,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "sync")]
     #[test]
     fn test_tag_events_sync() {
         let stream = [
@@ -1598,6 +1618,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "sync")]
     #[test]
     fn test_time_events_sync() {
         let stream = [
@@ -1633,6 +1654,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "sync")]
     #[test]
     fn test_empty_stream_sync() {
         let stream = &b""[..];
@@ -1640,6 +1662,7 @@ mod tests {
         assert_eq!(&[] as &[Event], &events[..]);
     }
 
+    #[cfg(feature = "sync")]
     #[test]
     fn test_end_stream_in_test_sync() {
         let stream = [&b"test old mcdonald\n"[..]];
@@ -1661,6 +1684,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "sync")]
     #[test]
     fn test_invalid_lines_passthrough_sync() {
         let stream = &b"randombytes\n"[..];
@@ -1668,6 +1692,7 @@ mod tests {
         assert_eq!(&[Event::Text("randombytes\n".into()),], &events[..]);
     }
 
+    #[cfg(feature = "sync")]
     #[test]
     fn test_end_stream_after_test_sync() {
         for variant in ["error", "failure", "success", "skip", "xfail", "uxsuccess"] {
@@ -1685,6 +1710,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "sync")]
     #[test]
     fn test_empty_bracket_content_sync() {
         for variant in ["error", "failure", "success", "skip", "xfail", "uxsuccess"] {
@@ -1706,6 +1732,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "sync")]
     #[test]
     fn test_end_stream_in_brackets_sync() {
         for outcome in ["error", "failure", "success", "skip", "xfail", "uxsuccess"] {
@@ -1732,6 +1759,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "sync")]
     #[test]
     fn round_trip_sync() {
         let stream = [
@@ -1798,11 +1826,14 @@ mod tests {
         let input = stream.join(&[][..]);
         let events = parse_stream(&input).await;
         // sync
-        let mut output = vec![];
-        for event in &events {
-            <Event as WriteInto>::write_into(&event, &mut output).unwrap();
+        #[cfg(feature = "sync")]
+        {
+            let mut output = vec![];
+            for event in &events {
+                <Event as WriteInto>::write_into(&event, &mut output).unwrap();
+            }
+            assert_eq!(BStr::new(&input), BStr::new(&output));
         }
-        assert_eq!(BStr::new(&input), BStr::new(&output));
 
         // async
         let mut output = vec![];
