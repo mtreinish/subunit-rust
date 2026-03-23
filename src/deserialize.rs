@@ -109,3 +109,150 @@ impl Deserializable for Vec<String> {
         Ok((result, offset))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::serialize::Serializable;
+
+    #[test]
+    fn test_u8_deserialize_empty() {
+        let result = u8::deserialize(&[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_u8_deserialize_ok() {
+        let (val, size) = u8::deserialize(&[0x42]).unwrap();
+        assert_eq!(val, 0x42);
+        assert_eq!(size, 1);
+    }
+
+    #[test]
+    fn test_u16_deserialize_empty() {
+        let result = u16::deserialize(&[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_u16_deserialize_one_byte() {
+        let result = u16::deserialize(&[0x01]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_u16_deserialize_ok() {
+        let (val, size) = u16::deserialize(&[0x01, 0x02]).unwrap();
+        assert_eq!(val, 0x0102);
+        assert_eq!(size, 2);
+    }
+
+    #[test]
+    fn test_string_required_bytes_empty() {
+        // Empty input: needs at least 1 byte for the length prefix
+        let required = String::required_bytes(&[]).unwrap();
+        assert_eq!(required, 1);
+    }
+
+    #[test]
+    fn test_string_required_bytes_with_length() {
+        // Length prefix says 3 bytes of content, using 1-byte encoding
+        // So total = 1 (length prefix) + 3 (content) = 4
+        let required = String::required_bytes(&[3, b'a', b'b', b'c']).unwrap();
+        assert_eq!(required, 4);
+    }
+
+    #[test]
+    fn test_string_required_bytes_just_length_prefix() {
+        // Exactly 1 byte: the length prefix itself (value=5)
+        // bytes.len() == required (1 == 1), so the < check passes and we proceed
+        // to parse the number and return 1 + 5 = 6
+        // If mutated to <=, it would return 1 early instead of 6
+        let required = String::required_bytes(&[5]).unwrap();
+        assert_eq!(required, 6);
+    }
+
+    #[test]
+    fn test_string_required_bytes_two_byte_length() {
+        // 2-byte length prefix for value 100: 0x40 | (100 >> 8), 100 & 0xFF = [0x40, 0x64]
+        let num = SubunitNumber::new(100).unwrap();
+        let mut buf = Vec::new();
+        num.serialize(&mut buf).unwrap();
+        buf.extend(vec![b'x'; 100]);
+        let required = String::required_bytes(&buf).unwrap();
+        assert_eq!(required, 102); // 2 (length prefix) + 100 (content)
+    }
+
+    #[test]
+    fn test_string_deserialize_roundtrip() {
+        let original = "hello world".to_string();
+        let mut buf = Vec::new();
+        original.serialize(&mut buf).unwrap();
+        let (deserialized, size) = String::deserialize(&buf).unwrap();
+        assert_eq!(deserialized, original);
+        assert_eq!(size, buf.len());
+    }
+
+    #[test]
+    fn test_string_deserialize_invalid_utf8() {
+        // Length prefix says 2 bytes, followed by invalid UTF-8
+        let buf = [2, 0xFF, 0xFE];
+        let result = String::deserialize(&buf);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_vec_u8_deserialize_empty_input() {
+        let result = Vec::<u8>::deserialize(&[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_vec_u8_deserialize_truncated() {
+        // Length prefix says 5 bytes but only 2 are provided
+        let buf = [5, b'a', b'b'];
+        let result = Vec::<u8>::deserialize(&buf);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_vec_u8_deserialize_ok() {
+        let buf = [3, b'a', b'b', b'c'];
+        let (val, size) = Vec::<u8>::deserialize(&buf).unwrap();
+        assert_eq!(val, vec![b'a', b'b', b'c']);
+        assert_eq!(size, 4);
+    }
+
+    #[test]
+    fn test_vec_u8_deserialize_exact_length() {
+        // Length prefix says 1 byte, exactly 1 byte of content follows
+        // total = 1 (length prefix) + 1 (content) = 2
+        // This catches + -> - (would check bytes.len() < 1 - 1 = 0, passes incorrectly for empty)
+        // and + -> * (would check bytes.len() < 1 * 1 = 1, which is wrong)
+        let buf = [1, b'x'];
+        let (val, size) = Vec::<u8>::deserialize(&buf).unwrap();
+        assert_eq!(val, vec![b'x']);
+        assert_eq!(size, 2);
+    }
+
+    #[test]
+    fn test_vec_u8_deserialize_missing_one_byte() {
+        // Length says 3, but only 2 bytes of content (total 3 bytes, need 4)
+        let buf = [3, b'a', b'b'];
+        let result = Vec::<u8>::deserialize(&buf);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_vec_u8_roundtrip() {
+        let original = vec![1u8, 2, 3, 4, 5];
+        let as_tuple = ("name".to_string(), original.clone());
+        let mut buf = Vec::new();
+        as_tuple.serialize(&mut buf).unwrap();
+        // Deserialize the string first, then the vec
+        let (name, name_size) = String::deserialize(&buf).unwrap();
+        assert_eq!(name, "name");
+        let (val, _) = Vec::<u8>::deserialize(&buf[name_size..]).unwrap();
+        assert_eq!(val, original);
+    }
+}

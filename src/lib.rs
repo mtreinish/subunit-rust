@@ -109,3 +109,28 @@ impl Debug for Error {
 
 type GenError = Box<dyn std::error::Error>;
 type GenResult<T> = Result<T, GenError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_max_packet_length() {
+        assert_eq!(constants::MAX_PACKET_LENGTH, 4_194_304);
+    }
+
+    #[test]
+    fn test_error_debug_uses_display() {
+        let err = Error::TooLarge;
+        assert_eq!(format!("{:?}", err), "Value is too large to encode");
+
+        let err = Error::NotEnoughBytes;
+        assert_eq!(format!("{:?}", err), "Not enough bytes");
+
+        let err = Error::LengthTooSmall(10, 20);
+        assert_eq!(
+            format!("{:?}", err),
+            "Invalid packet header: size 10 < header size 20"
+        );
+    }
+}

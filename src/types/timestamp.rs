@@ -183,4 +183,77 @@ mod tests {
             assert_eq!(dt, dt_back);
         }
     }
+
+    #[test]
+    fn test_timestamp_serialize_deserialize() {
+        use crate::deserialize::Deserializable;
+        use crate::serialize::Serializable;
+
+        let ts = Timestamp {
+            seconds: 1704067200,
+            nanoseconds: SubunitNumber::new(123456789).unwrap(),
+        };
+        let mut buf = Vec::new();
+        ts.serialize(&mut buf).unwrap();
+
+        let (deserialized, size) = Timestamp::deserialize(&buf).unwrap();
+        assert_eq!(deserialized.seconds, 1704067200);
+        assert_eq!(deserialized.nanoseconds.as_u32(), 123456789);
+        assert_eq!(size, buf.len());
+    }
+
+    #[test]
+    fn test_timestamp_required_bytes_insufficient() {
+        use crate::deserialize::Deserializable;
+
+        // Less than 5 bytes: returns 5
+        let required = Timestamp::required_bytes(&[0x00, 0x00]).unwrap();
+        assert_eq!(required, 5);
+    }
+
+    #[test]
+    fn test_timestamp_required_bytes_exactly_five_one_byte_nanos() {
+        use crate::deserialize::Deserializable;
+
+        // Exactly 5 bytes with 1-byte nanos → required = 4 + 1 = 5
+        let required = Timestamp::required_bytes(&[0x00, 0x00, 0x00, 0x00, 0x00]).unwrap();
+        assert_eq!(required, 5);
+    }
+
+    #[test]
+    fn test_timestamp_required_bytes_exactly_five_two_byte_nanos() {
+        use crate::deserialize::Deserializable;
+
+        // Exactly 5 bytes where byte[4] = 0x40 (TwoBytes marker for nanos)
+        // Original: 5 < 5 → false → check nanos type → TwoBytes → return 4+2=6
+        // Mutated (<=): 5 <= 5 → true → return 5 early (WRONG)
+        let required = Timestamp::required_bytes(&[0x00, 0x00, 0x00, 0x01, 0x40]).unwrap();
+        assert_eq!(required, 6);
+    }
+
+    #[test]
+    fn test_timestamp_deserialize_insufficient() {
+        use crate::deserialize::Deserializable;
+
+        // Only 3 bytes, not enough
+        let result = Timestamp::deserialize(&[0x00, 0x00, 0x00]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_timestamp_required_bytes_exact() {
+        use crate::deserialize::Deserializable;
+        use crate::serialize::Serializable;
+
+        // Serialize a timestamp and check required_bytes matches
+        let ts = Timestamp {
+            seconds: 100,
+            nanoseconds: SubunitNumber::new(50).unwrap(),
+        };
+        let mut buf = Vec::new();
+        ts.serialize(&mut buf).unwrap();
+
+        let required = Timestamp::required_bytes(&buf).unwrap();
+        assert_eq!(required, buf.len());
+    }
 }

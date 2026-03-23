@@ -260,10 +260,12 @@ impl Deserializable for Event {
         if packet_length.as_u32() > constants::MAX_PACKET_LENGTH {
             return Err(Error::TooLarge.into());
         }
-        if (packet_length.as_u32() as usize) < reader.bytes_read {
-            return Err(
-                Error::LengthTooSmall(packet_length.as_u32(), reader.bytes_read as u32).into(),
-            );
+        if (packet_length.as_u32() as usize) < reader.bytes_read + 4 {
+            return Err(Error::LengthTooSmall(
+                packet_length.as_u32(),
+                reader.bytes_read as u32 + 4,
+            )
+            .into());
         }
         Ok(packet_length.as_u32() as usize)
     }
@@ -287,9 +289,9 @@ impl Deserializable for Event {
         if packet_length > constants::MAX_PACKET_LENGTH as usize {
             return Err(Error::TooLarge.into());
         }
-        if packet_length < reader.bytes_read {
+        if packet_length < reader.bytes_read + 4 {
             return Err(
-                Error::LengthTooSmall(packet_length as u32, reader.bytes_read as u32).into(),
+                Error::LengthTooSmall(packet_length as u32, reader.bytes_read as u32 + 4).into(),
             );
         }
         // Don't permit out of bound reads. From this point on, we don't
@@ -646,6 +648,195 @@ mod tests {
 
     #[test]
     fn packet_length() {
+        // 1-byte length range: 0..=62
         assert_eq!(12, Event::packet_length(11).unwrap().as_u32());
+        assert_eq!(63, Event::packet_length(62).unwrap().as_u32());
+        // 2-byte length range: 63..=16381
+        assert_eq!(65, Event::packet_length(63).unwrap().as_u32());
+        assert_eq!(16383, Event::packet_length(16381).unwrap().as_u32());
+        // 3-byte length range: 16382..=4194300
+        assert_eq!(16385, Event::packet_length(16382).unwrap().as_u32());
+        assert_eq!(4194303, Event::packet_length(4194300).unwrap().as_u32());
+        // Too large
+        assert!(Event::packet_length(4194301).is_err());
+    }
+
+    #[test]
+    fn test_deserialize_bad_version() {
+        // Craft a packet with bad version (0x3000 instead of 0x2000)
+        let mut buf: Vec<u8> = vec![0xb3]; // signature
+        buf.extend_from_slice(&0x3003_u16.to_be_bytes()); // bad version + flags
+        buf.push(0x08); // packet length = 8
+        buf.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // crc32 placeholder
+
+        let err = Event::deserialize(&buf).unwrap_err();
+        // Error uses flags & 0xF00 mask, so 0x3003 & 0xF00 = 0x0
+        assert_eq!(format!("{}", err), "Bad version 0x0");
+    }
+
+    #[test]
+    fn test_required_bytes_bad_version() {
+        let mut buf: Vec<u8> = vec![0xb3]; // signature
+        buf.extend_from_slice(&0x3003_u16.to_be_bytes()); // bad version
+        buf.push(0x08); // packet length
+        buf.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // padding
+
+        let err = Event::required_bytes(&buf).unwrap_err();
+        assert_eq!(format!("{}", err), "Bad version 0x0");
+    }
+
+    #[test]
+    fn test_required_bytes_too_few_bytes() {
+        // Only signature, not enough for flags
+        let buf: Vec<u8> = vec![0xb3];
+        let required = Event::required_bytes(&buf).unwrap();
+        assert_eq!(required, 3); // needs at least signature + flags
+    }
+
+    #[test]
+    fn test_deserialize_packet_length_too_small() {
+        // Craft a packet where declared length < header bytes read
+        let mut buf: Vec<u8> = vec![0xb3]; // signature
+        buf.extend_from_slice(&0x2003_u16.to_be_bytes()); // valid version + status
+        buf.push(0x02); // packet length = 2, but we already read 4 bytes (sig + flags + len)
+        buf.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // crc32
+
+        let err = Event::deserialize(&buf).unwrap_err();
+        let msg = format!("{}", err);
+        assert_eq!(msg, "Invalid packet header: size 2 < header size 8");
+    }
+
+    #[test]
+    fn test_required_bytes_packet_length_too_small() {
+        let mut buf: Vec<u8> = vec![0xb3]; // signature
+        buf.extend_from_slice(&0x2003_u16.to_be_bytes()); // valid version
+        buf.push(0x02); // packet length = 2 < header
+        buf.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // padding
+
+        let err = Event::required_bytes(&buf).unwrap_err();
+        let msg = format!("{}", err);
+        assert_eq!(msg, "Invalid packet header: size 2 < header size 8");
+    }
+
+    #[test]
+    fn test_required_bytes_packet_length_equals_minimum() {
+        // Minimum valid packet: sig(1) + flags(2) + len(1) + crc(4) = 8
+        // packet_length == bytes_read + 4 == 8: should NOT error
+        let mut buf: Vec<u8> = vec![0xb3]; // signature
+        buf.extend_from_slice(&0x2000_u16.to_be_bytes()); // valid version, no features
+        buf.push(0x08); // packet length = 8 = header(4) + crc(4)
+        buf.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // crc placeholder
+
+        let required = Event::required_bytes(&buf).unwrap();
+        assert_eq!(required, 8);
+    }
+
+    #[test]
+    fn test_required_bytes_packet_length_too_small_for_crc() {
+        // packet_length = 4 (just header, no room for CRC) → should error
+        let mut buf: Vec<u8> = vec![0xb3]; // signature
+        buf.extend_from_slice(&0x2000_u16.to_be_bytes()); // valid version
+        buf.push(0x04); // packet length = 4, too small for header + crc
+        buf.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+
+        let err = Event::required_bytes(&buf).unwrap_err();
+        let msg = format!("{}", err);
+        assert_eq!(msg, "Invalid packet header: size 4 < header size 8");
+    }
+
+    #[test]
+    fn test_deserialize_packet_length_equals_minimum() {
+        // Minimum valid packet: sig(1) + flags(2) + len(1) + crc(4) = 8
+        let mut buf: Vec<u8> = vec![0xb3]; // signature
+        buf.extend_from_slice(&0x2000_u16.to_be_bytes()); // valid version, no features, status=Undefined
+        buf.push(0x08); // packet length = 8 (header + crc32)
+
+        // Calculate the correct CRC32 for the header bytes
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(&buf);
+        let crc = hasher.finalize();
+        buf.extend_from_slice(&crc.to_be_bytes());
+
+        let (event, size) = Event::deserialize(&buf).unwrap();
+        assert_eq!(size, 8);
+        assert_eq!(event.status, TestStatus::Undefined);
+    }
+
+    #[test]
+    fn test_deserialize_packet_length_too_small_for_crc() {
+        // packet_length = 4 (no room for CRC) used to panic, now returns error
+        let mut buf: Vec<u8> = vec![0xb3]; // signature
+        buf.extend_from_slice(&0x2000_u16.to_be_bytes()); // valid version
+        buf.push(0x04); // packet length = 4, too small
+        buf.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+
+        let err = Event::deserialize(&buf).unwrap_err();
+        let msg = format!("{}", err);
+        assert_eq!(msg, "Invalid packet header: size 4 < header size 8");
+    }
+
+    #[test]
+    fn test_required_bytes_max_packet_length_boundary() {
+        use crate::serialize::Serializable;
+        use crate::types::number::SubunitNumber;
+
+        // MAX_PACKET_LENGTH is accepted
+        let mut buf: Vec<u8> = vec![0xb3];
+        buf.extend_from_slice(&0x2000_u16.to_be_bytes());
+        let num = SubunitNumber::new(crate::constants::MAX_PACKET_LENGTH).unwrap();
+        num.serialize(&mut buf).unwrap();
+        buf.extend(vec![0x00; 100]);
+        let required = Event::required_bytes(&buf).unwrap();
+        assert_eq!(required, crate::constants::MAX_PACKET_LENGTH as usize);
+
+        // MAX_PACKET_LENGTH + 1 is rejected
+        let mut buf2: Vec<u8> = vec![0xb3];
+        buf2.extend_from_slice(&0x2000_u16.to_be_bytes());
+        let num2 = SubunitNumber::new(crate::constants::MAX_PACKET_LENGTH + 1).unwrap();
+        num2.serialize(&mut buf2).unwrap();
+        buf2.extend(vec![0x00; 100]);
+        let err = Event::required_bytes(&buf2).unwrap_err();
+        assert_eq!(format!("{}", err), "Value is too large to encode");
+    }
+
+    #[test]
+    fn test_deserialize_max_packet_length_boundary_deserialize() {
+        use crate::types::number::SubunitNumber;
+
+        // Build a 4MB packet with correct CRC32
+        let packet_length = crate::constants::MAX_PACKET_LENGTH as usize;
+        let mut buf = vec![0u8; packet_length];
+        buf[0] = 0xb3; // signature
+        buf[1..3].copy_from_slice(&0x2000_u16.to_be_bytes()); // version, no features
+        let num = SubunitNumber::new(crate::constants::MAX_PACKET_LENGTH).unwrap();
+        let len_bytes = num.as_bytes();
+        buf[3..3 + len_bytes.len()].copy_from_slice(len_bytes);
+        // Header is 7 bytes (sig + flags + 4-byte length). No features, so
+        // the reader reads 7 bytes then expects CRC32 at bytes[7..11].
+        let header_size = 3 + len_bytes.len(); // 7
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(&buf[..header_size]);
+        let crc = hasher.finalize();
+        buf[header_size..header_size + 4].copy_from_slice(&crc.to_be_bytes());
+
+        let (event, size) = Event::deserialize(&buf).unwrap();
+        assert_eq!(size, packet_length);
+        assert_eq!(event.status, TestStatus::Undefined);
+    }
+
+    #[test]
+    fn test_deserialize_over_max_packet_length() {
+        use crate::serialize::Serializable;
+        use crate::types::number::SubunitNumber;
+
+        // Packet declaring MAX_PACKET_LENGTH + 1 should be rejected
+        let mut buf: Vec<u8> = vec![0xb3];
+        buf.extend_from_slice(&0x2000_u16.to_be_bytes());
+        let num = SubunitNumber::new(crate::constants::MAX_PACKET_LENGTH + 1).unwrap();
+        num.serialize(&mut buf).unwrap();
+        buf.extend(vec![0x00; 100]);
+
+        let err = Event::deserialize(&buf).unwrap_err();
+        assert_eq!(format!("{}", err), "Value is too large to encode");
     }
 }

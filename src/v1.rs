@@ -1844,4 +1844,55 @@ mod tests {
         }
         assert_eq!(BStr::new(&input), BStr::new(&output));
     }
+
+    #[test]
+    fn test_part_debug() {
+        let part = Part::new("text/plain", "example", b"hello");
+        let debug = format!("{:?}", part);
+        assert_eq!(
+            debug,
+            "Part { content_type: \"text/plain\", name: \"example\", bytes: \"hello\" }"
+        );
+    }
+
+    #[test]
+    fn test_protocol_server_debug() {
+        let mut stream: &[u8] = b"test: foo\nsuccess: foo\n";
+        let server = super::TestProtocolServer {
+            reader: &mut stream,
+            state: super::ParseState::Global,
+        };
+        let debug = format!("{:?}", server);
+        assert_eq!(debug, "TestProtocolServer");
+    }
+
+    #[cfg(feature = "sync")]
+    #[test]
+    fn test_protocol_server_sync_debug() {
+        let mut stream: &[u8] = b"test: foo\nsuccess: foo\n";
+        let server = super::TestProtocolServerSync {
+            reader: &mut stream,
+            state: super::ParseState::Global,
+        };
+        let debug = format!("{:?}", server);
+        assert_eq!(debug, "TestProtocolServerSync");
+    }
+
+    #[tokio::test]
+    async fn test_write_into_async_tags_multiple() {
+        // Test tags with multiple added and removed to exercise pos += 1
+        // in both the added and removed loops
+        let event = Event::Tags(
+            vec!["foo".to_string()],
+            vec!["bar".to_string(), "baz".to_string()],
+        );
+        let mut output = vec![];
+        <Event as WriteIntoAsync>::write_into(&event, &mut output)
+            .await
+            .unwrap();
+        assert_eq!(
+            std::str::from_utf8(&output).unwrap(),
+            "tags: foo -bar -baz\n"
+        );
+    }
 }

@@ -147,3 +147,34 @@ where
         self.buffer.flush()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    struct FlushTracker {
+        flushed: bool,
+    }
+
+    impl Write for FlushTracker {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flushed = true;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_writer_flush() {
+        let mut tracker = FlushTracker { flushed: false };
+        {
+            let mut writer = Writer::new(&mut tracker);
+            writer.write_all(b"hello").unwrap();
+            writer.flush().unwrap();
+        }
+        assert!(tracker.flushed);
+    }
+}
