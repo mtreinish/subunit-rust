@@ -142,6 +142,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(results.len(), 3);
+        for item in &results {
+            assert!(
+                matches!(item, ScannedItem::Event(_)),
+                "Expected Event, got {:?}",
+                item
+            );
+        }
     }
 
     #[tokio::test]

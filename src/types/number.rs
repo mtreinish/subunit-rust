@@ -278,4 +278,102 @@ mod tests {
         assert_eq!(number.as_u32(), 0x3FFFFFFF);
         assert_eq!(number.as_bytes(), &[0b11111111, 255, 255, 255]);
     }
+
+    #[test]
+    fn test_wire_size() {
+        use crate::serialize::Serializable;
+        // 1-byte range: 0..=63
+        assert_eq!(
+            SubunitNumber::new(0).unwrap().wire_size().unwrap().as_u32(),
+            1
+        );
+        assert_eq!(
+            SubunitNumber::new(63)
+                .unwrap()
+                .wire_size()
+                .unwrap()
+                .as_u32(),
+            1
+        );
+        // 2-byte range: 64..=16383
+        assert_eq!(
+            SubunitNumber::new(64)
+                .unwrap()
+                .wire_size()
+                .unwrap()
+                .as_u32(),
+            2
+        );
+        assert_eq!(
+            SubunitNumber::new(100)
+                .unwrap()
+                .wire_size()
+                .unwrap()
+                .as_u32(),
+            2
+        );
+        assert_eq!(
+            SubunitNumber::new(16383)
+                .unwrap()
+                .wire_size()
+                .unwrap()
+                .as_u32(),
+            2
+        );
+        // 3-byte range: 16384..=4194303
+        assert_eq!(
+            SubunitNumber::new(16384)
+                .unwrap()
+                .wire_size()
+                .unwrap()
+                .as_u32(),
+            3
+        );
+        assert_eq!(
+            SubunitNumber::new(4194303)
+                .unwrap()
+                .wire_size()
+                .unwrap()
+                .as_u32(),
+            3
+        );
+        // 4-byte range
+        assert_eq!(
+            SubunitNumber::new(4194304)
+                .unwrap()
+                .wire_size()
+                .unwrap()
+                .as_u32(),
+            4
+        );
+    }
+
+    #[test]
+    fn test_debug_format() {
+        let number = SubunitNumber::new(42).unwrap();
+        let debug = format!("{:?}", number);
+        assert_eq!(debug, "SubunitNumber(42 [42])");
+    }
+
+    #[test]
+    fn test_serialize_deserialize_roundtrip() {
+        use crate::deserialize::Deserializable;
+        use crate::serialize::Serializable;
+
+        for value in [
+            0, 1, 63, 64, 100, 16383, 16384, 100000, 4194303, 4194304, 0x3FFFFFFF,
+        ] {
+            let number = SubunitNumber::new(value).unwrap();
+            let mut buf = Vec::new();
+            number.serialize(&mut buf).unwrap();
+            let (deserialized, size) = SubunitNumber::deserialize(&buf).unwrap();
+            assert_eq!(
+                deserialized.as_u32(),
+                value,
+                "Roundtrip failed for {}",
+                value
+            );
+            assert_eq!(size, buf.len(), "Size mismatch for {}", value);
+        }
+    }
 }
